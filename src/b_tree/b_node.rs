@@ -31,6 +31,7 @@ impl BNodeType {
     }
 }
 
+#[derive(Clone)]
 pub struct BNode {
     pub cursor: Cursor<Vec<u8>>,
 } 
@@ -83,15 +84,15 @@ impl BNode {
 
     fn set_ptr(&mut self, idx : u16, val : u64) {
         assert!(idx < self.num_keys());
-        let pos : u64 = HEADER as u64 + 8 * idx as u64;
-        self.cursor.set_position(pos);
+        let pos = HEADER + 8 * idx;
+        self.cursor.set_position(pos as u64);
         self.cursor.write_u64::<LittleEndian>(val).unwrap();
     }
 
     // Offset List
     pub fn offset_pos(&mut self, idx : u16) -> u16 {
         assert!(1 <= idx && idx <= self.num_keys());
-         HEADER as u16 + 8 * self.num_keys() as u16 + 2 * (idx - 1)
+         HEADER + 8 * self.num_keys() + 2 * (idx - 1)
     }
 
     pub fn get_offset(&mut self, idx : u16) -> u16 {
@@ -175,11 +176,11 @@ impl BNode {
         found
     }
 
-    // add a new key to a leaf node
+    /** Add a new key to a leaf node. Returns a double sized node which needs to be dealt with */
     pub fn leaf_insert(mut self, idx : u16, key : &Vec<u8>, val : &Vec<u8>) -> BNode {
         let old_num_keys = self.num_keys();
 
-        let mut new_node = BNode::new(BNodeType::LEAF, old_num_keys + 1);
+        let mut new_node = BNode::new_with_size(BNodeType::LEAF, old_num_keys + 1, 2 * BTREE_PAGE_SIZE);
         new_node.node_append_range(&mut self, 0, 0, idx);
         new_node.node_append_kv(idx, 0, key, val);
         new_node.node_append_range(&mut self, idx + 1, idx,  old_num_keys-idx);
@@ -187,10 +188,11 @@ impl BNode {
         new_node
     }
 
+    /** Update a key in a leaf node. Returns a double sized node which needs to be dealt with */
     pub fn leaf_update(mut self, idx : u16, key : &Vec<u8>, val : &Vec<u8>) -> BNode {
         let old_num_keys = self.num_keys();
 
-        let mut new_node = BNode::new(BNodeType::LEAF, old_num_keys);
+        let mut new_node = BNode::new_with_size(BNodeType::LEAF, old_num_keys, 2 * BTREE_PAGE_SIZE);
         new_node.node_append_range(&mut self, 0, 0, idx);
         new_node.node_append_kv(idx, 0, key, val);
         new_node.node_append_range(&mut self, idx + 1, idx + 1,  old_num_keys-idx-1);
@@ -214,7 +216,7 @@ impl BNode {
         let right_num_keys = right.num_keys();
         let new_num_keys = left_num_keys + right_num_keys;
 
-        let mut new_node = BNode::new(BNodeType::NODE, new_num_keys);
+        let mut new_node = BNode::new(self.b_type(), new_num_keys);
         new_node.node_append_range(&mut self, 0, 0, left_num_keys);
         new_node.node_append_range(&mut right, left_num_keys, 0, right_num_keys);
 
@@ -290,19 +292,21 @@ impl BNode {
         // initial guess for the split point
         let mut n_left = self.num_keys() / 2;
 
-        fn calc_num_left_bytes(n_left : u16) -> usize {
-            HEADER as usize + 10 * n_left as usize
-        };
+        fn calc_num_left_bytes(old_node : &mut BNode, n_left : u16) -> usize {
+            HEADER as usize + 10 * n_left as usize + old_node.get_offset(n_left) as usize
+        }
 
-        while calc_num_left_bytes(n_left) > BTREE_PAGE_SIZE {
+        while calc_num_left_bytes(&mut self, n_left) > BTREE_PAGE_SIZE {
             n_left -= 1;
         };
         assert!(n_left >= 1);
 
         // try to fit the right half
         fn calc_num_right_bytes(old_node: &mut BNode, n_left : u16) -> usize {
-            old_node.num_bytes() as usize - calc_num_left_bytes(n_left) + HEADER as usize
-        };
+            let num_left_bytes = calc_num_left_bytes(old_node, n_left);
+            old_node.num_bytes() as usize - num_left_bytes + HEADER as usize
+        }
+
         while calc_num_right_bytes(&mut self, n_left) > BTREE_PAGE_SIZE {
             n_left += 1;
         };
@@ -321,9 +325,10 @@ impl BNode {
         (left_node, right_node)
     }
 
-    // split a node if it's too big. the results are 1~3 nodes
+    /** split a node if it's too big. the results are 1~3 correctly sized nodes */
     pub fn split3(mut self) -> (u16, Vec<BNode>) {
         if self.num_bytes() <= BTREE_PAGE_SIZE as u16 {
+            self.resize_buffer(BTREE_PAGE_SIZE);
             return (1, vec!{self});
         };
 
@@ -343,11 +348,9 @@ impl BNode {
         let mut new_buffer = vec![0; new_size];
 
         // Copy the data from the old buffer to the new buffer
-        let old_cursor_position = self.cursor.position() as usize;
         let old_buffer = self.cursor.get_ref();
 
-        new_buffer[..old_cursor_position]
-            .copy_from_slice(&old_buffer[..old_cursor_position]);
+        new_buffer.copy_from_slice(&old_buffer[..new_size]);
 
         // Update the cursor to use the new buffer
         self.cursor = Cursor::new(new_buffer);
