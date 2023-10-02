@@ -1,7 +1,6 @@
 extern crate byteorder;
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::vec::Vec;
-use std::io::{Cursor, Write, Read};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 // node format:
 // | type | num_keys |  pointers  |   offsets  | key-values
@@ -11,13 +10,14 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 // | klen | vlen | key | val |
 // |  2B  |  2B  | ... | ... |
 
-
 pub const HEADER: u16 = 4;
 
 pub const BTREE_PAGE_SIZE: usize = 4096;
 pub const BTREE_MAX_KEY_SIZE: usize = 1000;
 pub const BTREE_MAX_VAL_SIZE: usize = 3000;
 
+pub const U16_SIZE: usize = 2;
+pub const U64_SIZE: usize = 8;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum BNodeType {
@@ -33,134 +33,143 @@ impl BNodeType {
 
 #[derive(Clone)]
 pub struct BNode {
-    pub cursor: Cursor<Vec<u8>>,
-} 
+    data: [u8; 2 * BTREE_PAGE_SIZE],
+    actual_size: usize,
+}
 
 impl BNode {
-    pub fn new(b_type : BNodeType, num_keys: u16) -> BNode {
-        let mut new_node = BNode { 
-            cursor: Cursor::new(vec![0; BTREE_PAGE_SIZE as usize]) 
+    pub fn new(b_type: BNodeType, num_keys: u16) -> BNode {
+        let mut new_node = BNode {
+            data: [0; 2 * BTREE_PAGE_SIZE],
+            actual_size: BTREE_PAGE_SIZE,
         };
         new_node.set_header(b_type, num_keys);
         new_node
     }
-    pub fn new_with_size(b_type : BNodeType, num_keys: u16, size : usize) -> BNode {
+    pub fn new_with_size(b_type: BNodeType, num_keys: u16, size: usize) -> BNode {
         let mut new_node = BNode {
-            cursor: Cursor::new(vec![0; size]),
+            data: [0; 2 * BTREE_PAGE_SIZE],
+            actual_size: size,
         };
         new_node.set_header(b_type, num_keys);
         new_node
+    }
+
+    /** Creates a BNode from a slice. Slice must be of length BTREE_PAGE_SLICE */
+    pub fn from(data_in: &[u8]) -> BNode {
+        assert!(data_in.len() == BTREE_PAGE_SIZE);
+        let mut data = [0; 2 * BTREE_PAGE_SIZE];
+        data[..BTREE_PAGE_SIZE].copy_from_slice(&data_in);
+        BNode {
+            data,
+            actual_size: BTREE_PAGE_SIZE,
+        }
+    }
+
+    pub fn get_data(&self) -> &[u8] {
+        &self.data[..self.actual_size]
     }
 
     // Header
     fn set_header(&mut self, b_type: BNodeType, num_keys: u16) {
-        self.cursor.set_position(0);
-        self.cursor.write_u16::<LittleEndian>(b_type.value()).unwrap();
-        self.cursor.write_u16::<LittleEndian>(num_keys).unwrap();
+        LittleEndian::write_u16(&mut self.data[..2], b_type.value());
+        LittleEndian::write_u16(&mut self.data[2..4], num_keys);
     }
 
-    pub fn b_type(&mut self) -> BNodeType {
-        self.cursor.set_position(0);
-
-        match self.cursor.read_u16::<LittleEndian>().unwrap() {
+    pub fn b_type(&self) -> BNodeType {
+        match LittleEndian::read_u16(&self.data[..2]) {
             1 => BNodeType::NODE,
             2 => BNodeType::LEAF,
             n => panic!("Invalid BNode type {}", n),
         }
     }
 
-    pub fn num_keys(&mut self) -> u16 {
-        self.cursor.set_position(2);
-        self.cursor.read_u16::<LittleEndian>().unwrap()
+    pub fn num_keys(&self) -> u16 {
+        LittleEndian::read_u16(&self.data[2..4])
     }
 
     // Page Pointers
-    pub fn get_ptr(&mut self, idx: u16) -> u64 {
+    pub fn get_ptr(&self, idx: u16) -> u64 {
         assert!(idx < self.num_keys());
-        let pos = HEADER + 8 * idx;
-        self.cursor.set_position(pos as u64);
-        self.cursor.read_u64::<LittleEndian>().unwrap()
+        let pos: usize = HEADER as usize + 8 * idx as usize;
+        LittleEndian::read_u64(&self.data[pos..pos + U64_SIZE])
     }
 
-    fn set_ptr(&mut self, idx : u16, val : u64) {
+    fn set_ptr(&mut self, idx: u16, val: u64) {
         assert!(idx < self.num_keys());
-        let pos = HEADER + 8 * idx;
-        self.cursor.set_position(pos as u64);
-        self.cursor.write_u64::<LittleEndian>(val).unwrap();
+        let pos: usize = HEADER as usize + 8 * idx as usize;
+        LittleEndian::write_u64(&mut self.data[pos..pos + U64_SIZE], val)
     }
 
     // Offset List
-    pub fn offset_pos(&mut self, idx : u16) -> u16 {
+    pub fn offset_pos(&self, idx: u16) -> u16 {
         assert!(1 <= idx && idx <= self.num_keys());
-         HEADER + 8 * self.num_keys() + 2 * (idx - 1)
+        HEADER + 8 * self.num_keys() + 2 * (idx - 1)
     }
 
-    pub fn get_offset(&mut self, idx : u16) -> u16 {
+    pub fn get_offset(&self, idx: u16) -> u16 {
         if idx == 0 {
             return 0;
         }
-        let pos = self.offset_pos(idx);
-        self.cursor.set_position(pos as u64);
-        self.cursor.read_u16::<LittleEndian>().unwrap()
+        let pos: usize = self.offset_pos(idx) as usize;
+        LittleEndian::read_u16(&self.data[pos..pos + U16_SIZE])
     }
 
-    fn set_offset(&mut self, idx : u16, val : u16) {
+    fn set_offset(&mut self, idx: u16, val: u16) {
         assert!(idx <= self.num_keys());
-        let pos = self.offset_pos(idx);
-        self.cursor.set_position(pos as u64);
-        self.cursor.write_u16::<LittleEndian>(val).unwrap();
+        let pos: usize = self.offset_pos(idx) as usize;
+        LittleEndian::write_u16(&mut self.data[pos..pos + U16_SIZE], val)
     }
 
     // key-values
-    pub fn kv_pos(&mut self, idx : u16) -> u16 {
+    pub fn kv_pos(&self, idx: u16) -> u16 {
         let num_keys = self.num_keys();
         assert!(idx <= num_keys);
         HEADER as u16 + 10 * num_keys + self.get_offset(idx)
     }
 
-    pub fn get_key(&mut self, idx: u16) -> Vec<u8> {
+    pub fn get_key(&self, idx: u16) -> Vec<u8> {
         assert!(idx < self.num_keys());
 
         // Position of the key
-        let pos = self.kv_pos(idx);
-        self.cursor.set_position(pos as u64);
+        let pos: usize = self.kv_pos(idx) as usize;
 
         // Length of the key
-        let key_length = self.cursor.read_u16::<LittleEndian>().unwrap();
-        self.cursor.set_position(pos as u64 + 4);
-        let mut key = vec![0; key_length as usize];
-        self.cursor.read_exact(&mut key).unwrap();
+        let key_length = LittleEndian::read_u16(&self.data[pos..pos + U16_SIZE]);
+
+        let key_pos = pos + 4;
+        let mut key = self.data[key_pos..key_pos + key_length as usize].to_vec();
         key
     }
 
-    pub fn get_val(&mut self, idx: u16) -> Vec<u8> {
+    pub fn get_val(&self, idx: u16) -> Vec<u8> {
         assert!(idx < self.num_keys());
 
-        // Position of the value
-        let pos = self.kv_pos(idx);
-        self.cursor.set_position(pos as u64);
+        // Position of the start of the kv block
+        let pos: usize = self.kv_pos(idx) as usize;
 
         // Length of the key
-        let key_length = self.cursor.read_u16::<LittleEndian>().unwrap();
+        let key_length = LittleEndian::read_u16(&self.data[pos..pos + U16_SIZE]);
         // Length of the value
-        let val_length = self.cursor.read_u16::<LittleEndian>().unwrap();
+        let val_length_pos = pos + U16_SIZE;
+        let val_length =
+            LittleEndian::read_u16(&self.data[val_length_pos..val_length_pos + U16_SIZE]);
 
-        self.cursor.set_position(pos as u64 + 4 + key_length as u64);
-        let mut val = vec![0; val_length as usize];
-        self.cursor.read_exact(&mut val).unwrap();
-        val
+        let val_pos = pos + 2 * U16_SIZE + key_length as usize;
+        self.data[val_pos..val_pos + val_length as usize].to_vec()
     }
 
-
     // node size in bytes
-    pub fn num_bytes(&mut self) -> u16 {
+    pub fn num_bytes(&self) -> u16 {
         let num_keys = self.num_keys();
-        self.kv_pos(num_keys)
+        let num_bytes = self.kv_pos(num_keys);
+        assert!(num_bytes <= self.actual_size as u16);
+        num_bytes
     }
 
     // returns the first kid node whose range intersects the key. (kid[i] <= key)
     // TODO: bisect
-    pub fn node_lookup_le(&mut self, key: &Vec<u8>) -> u16 {
+    pub fn node_lookup_le(&self, key: &Vec<u8>) -> u16 {
         let mut found = 0;
         // the first key is a copy from the parent node,
         // thus it's always less than or equal to the key.
@@ -177,31 +186,31 @@ impl BNode {
     }
 
     /** Add a new key to a leaf node. Returns a double sized node which needs to be dealt with */
-    pub fn leaf_insert(mut self, idx : u16, key : &Vec<u8>, val : &Vec<u8>) -> BNode {
+    pub fn leaf_insert(mut self, idx: u16, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
         let old_num_keys = self.num_keys();
 
-        let mut new_node = BNode::new_with_size(BNodeType::LEAF, old_num_keys + 1, 2 * BTREE_PAGE_SIZE);
+        let mut new_node =
+            BNode::new_with_size(BNodeType::LEAF, old_num_keys + 1, 2 * BTREE_PAGE_SIZE);
         new_node.node_append_range(&mut self, 0, 0, idx);
         new_node.node_append_kv(idx, 0, key, val);
-        new_node.node_append_range(&mut self, idx + 1, idx,  old_num_keys-idx);
+        new_node.node_append_range(&mut self, idx + 1, idx, old_num_keys - idx);
 
         new_node
     }
 
     /** Update a key in a leaf node. Returns a double sized node which needs to be dealt with */
-    pub fn leaf_update(mut self, idx : u16, key : &Vec<u8>, val : &Vec<u8>) -> BNode {
+    pub fn leaf_update(mut self, idx: u16, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
         let old_num_keys = self.num_keys();
 
         let mut new_node = BNode::new_with_size(BNodeType::LEAF, old_num_keys, 2 * BTREE_PAGE_SIZE);
         new_node.node_append_range(&mut self, 0, 0, idx);
         new_node.node_append_kv(idx, 0, key, val);
-        new_node.node_append_range(&mut self, idx + 1, idx + 1,  old_num_keys-idx-1);
+        new_node.node_append_range(&mut self, idx + 1, idx + 1, old_num_keys - idx - 1);
 
         new_node
     }
 
-
-    pub fn leaf_delete(mut self, idx : u16) -> BNode {
+    pub fn leaf_delete(mut self, idx: u16) -> BNode {
         let old_num_keys = self.num_keys();
 
         let mut new_node = BNode::new(BNodeType::LEAF, old_num_keys - 1);
@@ -211,7 +220,7 @@ impl BNode {
         new_node
     }
 
-    pub fn node_merge(mut self, mut right : BNode) -> BNode {
+    pub fn node_merge(mut self, mut right: BNode) -> BNode {
         let left_num_keys = self.num_keys();
         let right_num_keys = right.num_keys();
         let new_num_keys = left_num_keys + right_num_keys;
@@ -223,10 +232,10 @@ impl BNode {
         new_node
     }
 
-    pub fn node_replace_2_kid(mut self, idx : u16, ptr: u64, key : &Vec<u8>) -> BNode {
+    pub fn node_replace_2_kid(mut self, idx: u16, ptr: u64, key: &Vec<u8>) -> BNode {
         let old_num_keys = self.num_keys();
         let mut new_node = BNode::new(BNodeType::NODE, old_num_keys - 1);
-        
+
         new_node.node_append_range(&mut self, 0, 0, idx);
         new_node.node_append_kv(idx, ptr, key, &vec![]);
         new_node.node_append_range(&mut self, idx + 1, idx + 2, old_num_keys - idx - 2);
@@ -234,7 +243,7 @@ impl BNode {
         new_node
     }
 
-    pub fn node_append_range(&mut self, old : &mut BNode, dst_new : u16, src_old : u16, n : u16) {
+    pub fn node_append_range(&mut self, old: &BNode, dst_new: u16, src_old: u16, n: u16) {
         assert!(src_old + n <= old.num_keys());
         assert!(dst_new + n <= self.num_keys());
         if n == 0 {
@@ -248,77 +257,82 @@ impl BNode {
         // offsets
         let dst_begin = self.get_offset(dst_new);
         let src_begin = old.get_offset(src_old);
-        for i in 1..=n { // NOTE: the range is [1, n]
+        for i in 1..=n {
+            // NOTE: the range is [1, n]
             let offset = dst_begin + old.get_offset(src_old + i) - src_begin;
             self.set_offset(dst_new + i, offset);
         }
 
         // KVs
+        // Copy from old
         let begin = old.kv_pos(src_old);
         let end = old.kv_pos(src_old + n);
-        let mut buf = vec![0; (end - begin) as usize];
-        old.cursor.set_position(begin as u64);
-        old.cursor.read_exact(&mut buf).unwrap();
-        let kv_pos = self.kv_pos(dst_new) as u64;
-        self.cursor.set_position(kv_pos);
-        self.cursor.write_all(&buf).unwrap();
+        let buf = &old.data[begin as usize..end as usize];
+
+        // Insert into new
+        let kv_pos: usize = self.kv_pos(dst_new) as usize;
+        let buf_len = end - begin;
+        self.data[kv_pos..kv_pos + buf_len as usize].copy_from_slice(buf);
     }
 
     // copy a KV into the position
-    pub fn node_append_kv(&mut self, idx: u16, ptr : u64, key: &Vec<u8>, val : &Vec<u8>) {
+    pub fn node_append_kv(&mut self, idx: u16, ptr: u64, key: &Vec<u8>, val: &Vec<u8>) {
         // ptrs
         self.set_ptr(idx, ptr);
 
         // KVs
-        let pos = self.kv_pos(idx);
-        self.cursor.set_position(pos as u64);
-        // kLen and vLen
-        self.cursor.write_u16::<LittleEndian>(key.len() as u16).unwrap();
-        self.cursor.write_u16::<LittleEndian>(val.len() as u16).unwrap();
-        // key and value
-        self.cursor.write_all(key).unwrap();
-        self.cursor.write_all(val).unwrap();
+        let pos: usize = self.kv_pos(idx) as usize;
+        LittleEndian::write_u16(&mut self.data[pos..pos + U16_SIZE], key.len() as u16);
+        let vlen_pos = pos + U16_SIZE;
+        LittleEndian::write_u16(
+            &mut self.data[vlen_pos..vlen_pos + U16_SIZE],
+            val.len() as u16,
+        );
+        let key_pos = pos + 2 * U16_SIZE;
+        self.data[key_pos..key_pos + key.len()].copy_from_slice(key);
+        let val_pos = key_pos + key.len();
+        self.data[val_pos..val_pos + val.len()].copy_from_slice(val);
 
         // the offset of the next key
         let idx_offset = self.get_offset(idx);
-        self.set_offset(idx+1, idx_offset+4+(key.len() + val.len()) as u16);
+        self.set_offset(idx + 1, idx_offset + 4 + (key.len() + val.len()) as u16);
     }
 
     // split a bigger-than-allowed node into two.
     // the second node always fits on a page.
-    pub fn split2(mut self, left_size : usize) -> (BNode, BNode) {
+    pub fn split2(self, left_size: usize) -> (BNode, BNode) {
         assert!(self.num_keys() >= 2);
 
         // initial guess for the split point
         let mut n_left = self.num_keys() / 2;
 
-        fn calc_num_left_bytes(old_node : &mut BNode, n_left : u16) -> usize {
+        fn calc_num_left_bytes(old_node: &BNode, n_left: u16) -> usize {
             HEADER as usize + 10 * n_left as usize + old_node.get_offset(n_left) as usize
         }
 
-        while calc_num_left_bytes(&mut self, n_left) > BTREE_PAGE_SIZE {
+        while calc_num_left_bytes(&self, n_left) > BTREE_PAGE_SIZE {
             n_left -= 1;
-        };
+        }
         assert!(n_left >= 1);
 
         // try to fit the right half
-        fn calc_num_right_bytes(old_node: &mut BNode, n_left : u16) -> usize {
+        fn calc_num_right_bytes(old_node: &BNode, n_left: u16) -> usize {
             let num_left_bytes = calc_num_left_bytes(old_node, n_left);
             old_node.num_bytes() as usize - num_left_bytes + HEADER as usize
         }
 
-        while calc_num_right_bytes(&mut self, n_left) > BTREE_PAGE_SIZE {
+        while calc_num_right_bytes(&self, n_left) > BTREE_PAGE_SIZE {
             n_left += 1;
-        };
+        }
         assert!(n_left < self.num_keys());
         let n_right = self.num_keys() - n_left;
 
         // Create new nodes
         let mut left_node = BNode::new_with_size(self.b_type(), n_left, left_size); // Might be split later
-        left_node.node_append_range(&mut self, 0, 0, n_left);
+        left_node.node_append_range(&self, 0, 0, n_left);
 
-        let mut right_node = BNode::new_with_size(self.b_type(), n_right, BTREE_PAGE_SIZE); 
-        right_node.node_append_range(&mut self, 0, n_left, n_right);
+        let mut right_node = BNode::new_with_size(self.b_type(), n_right, BTREE_PAGE_SIZE);
+        right_node.node_append_range(&self, 0, n_left, n_right);
 
         // Make sure right side is not too big. Left may still be too big
         assert!(right_node.num_bytes() <= BTREE_PAGE_SIZE as u16);
@@ -329,7 +343,7 @@ impl BNode {
     pub fn split3(mut self) -> (u16, Vec<BNode>) {
         if self.num_bytes() <= BTREE_PAGE_SIZE as u16 {
             self.resize_buffer(BTREE_PAGE_SIZE);
-            return (1, vec!{self});
+            return (1, vec![self]);
         };
 
         let (mut left_node, right_node) = self.split2(2 * BTREE_PAGE_SIZE);
@@ -345,17 +359,8 @@ impl BNode {
 
     pub fn resize_buffer(&mut self, new_size: usize) {
         // Create a new buffer with the desired size and initialize with zeros
-        let mut new_buffer = vec![0; new_size];
-
-        // Copy the data from the old buffer to the new buffer
-        let old_buffer = self.cursor.get_ref();
-
-        new_buffer.copy_from_slice(&old_buffer[..new_size]);
-
-        // Update the cursor to use the new buffer
-        self.cursor = Cursor::new(new_buffer);
+        self.actual_size = new_size;
     }
-
 }
 
 #[cfg(test)]
@@ -364,7 +369,8 @@ mod tests {
 
     #[test]
     fn test_size_of_node() {
-        const MAX_SIZE : u32 = HEADER as u32 + 8 + 2 + 4 + BTREE_MAX_KEY_SIZE as u32 + BTREE_MAX_VAL_SIZE as u32;
+        const MAX_SIZE: u32 =
+            HEADER as u32 + 8 + 2 + 4 + BTREE_MAX_KEY_SIZE as u32 + BTREE_MAX_VAL_SIZE as u32;
         assert!(MAX_SIZE <= BTREE_PAGE_SIZE as u32);
     }
 
@@ -420,7 +426,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_bnode_kv_pos() {
         let mut bnode = BNode::new(BNodeType::NODE, 3);
@@ -437,7 +442,6 @@ mod tests {
             assert_eq!(bnode.kv_pos(i), expected_pos);
         }
     }
-
 
     #[test]
     fn test_bnode_get_key() {
@@ -503,7 +507,7 @@ mod tests {
 
         let new_key = vec![4u8; 4];
         let new_val = vec![4u8; 4];
-        let mut bnode = old_bnode.leaf_insert( 1, &new_key, &new_val);
+        let mut bnode = old_bnode.leaf_insert(1, &new_key, &new_val);
 
         assert_eq!(bnode.num_keys(), 4);
         assert_eq!(bnode.get_key(0), vec![0u8; 4]);

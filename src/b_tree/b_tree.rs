@@ -1,11 +1,9 @@
 use crate::b_tree::b_node::{BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE};
-use core::num;
 use std::cmp::Ordering;
-use std::ptr;
 
 use super::b_node::{BNode, BNodeType, BTREE_PAGE_SIZE, HEADER};
 
-pub enum MergeDirection {
+enum MergeDirection {
     LEFT(BNode),
     RIGHT(BNode),
     NONE,
@@ -56,7 +54,7 @@ impl BTree {
     /** inserts a key into an internal node, the result will be a double sized node */
     fn node_insert(
         &mut self,
-        mut node_to_have_key: BNode,
+        node_to_have_key: BNode,
         idx: u16,
         key: &Vec<u8>,
         val: &Vec<u8>,
@@ -76,7 +74,7 @@ impl BTree {
         self.node_replace_kid_n(2 * BTREE_PAGE_SIZE, node_to_have_key, idx, splited)
     }
 
-    fn node_delete(&mut self, mut node_with_key: BNode, idx: u16, key: &Vec<u8>) -> Option<BNode> {
+    fn node_delete(&mut self, node_with_key: BNode, idx: u16, key: &Vec<u8>) -> Option<BNode> {
         // recurse into the kid
         let kid_ptr = node_with_key.get_ptr(idx);
         let node_with_key_removed = self.tree_delete((self.get)(kid_ptr), key);
@@ -86,7 +84,7 @@ impl BTree {
         (self.del)(kid_ptr);
 
         // merge or redistribute
-        let merge_direction = self.should_merge(&mut node_with_key, idx, &mut updated_node);
+        let merge_direction = self.should_merge(&node_with_key, idx, &mut updated_node);
         Some(match merge_direction {
             MergeDirection::LEFT(sibling) => {
                 let mut merged = sibling.node_merge(updated_node);
@@ -111,7 +109,7 @@ impl BTree {
     fn node_replace_kid_n(
         &mut self,
         new_node_size: usize,
-        mut old_node: BNode,
+        old_node: BNode,
         idx: u16,
         new_children: Vec<BNode>,
     ) -> BNode {
@@ -122,13 +120,13 @@ impl BTree {
         // Replacing one old child node with new children (2 or 3)
         let mut new_node =
             BNode::new_with_size(BNodeType::NODE, old_num_keys - 1 + num_new, new_node_size);
-        new_node.node_append_range(&mut old_node, 0, 0, idx);
+        new_node.node_append_range(&old_node, 0, 0, idx);
         for (i, mut node) in new_children.into_iter().enumerate() {
             let node_first_key = node.get_key(0);
             new_node.node_append_kv(idx + i as u16, (self.new)(node), &node_first_key, &vec![])
         }
         new_node.node_append_range(
-            &mut old_node,
+            &old_node,
             idx + num_new,
             idx + 1,
             old_num_keys - (idx + 1),
@@ -138,10 +136,10 @@ impl BTree {
     }
 
     fn should_merge(
-        &mut self,
-        node_with_key: &mut BNode,
+        &self,
+        node_with_key: &BNode,
         idx: u16,
-        updated_node: &mut BNode,
+        updated_node: &BNode,
     ) -> MergeDirection {
         if updated_node.num_bytes() > BTREE_PAGE_SIZE as u16 / 4 {
             return MergeDirection::NONE;
@@ -194,7 +192,7 @@ impl BTree {
     }
 
     pub fn Insert(&mut self, key: &Vec<u8>, val: &Vec<u8>) {
-        assert!(key.len() > 0);
+        assert!(!key.is_empty());
         assert!(key.len() <= BTREE_MAX_KEY_SIZE);
         assert!(val.len() <= BTREE_MAX_VAL_SIZE);
 
@@ -261,10 +259,6 @@ mod tests {
                 let pages: Rc<RefCell<HashMap<u64, BNode>>> = Rc::clone(&pages);
                 Box::new(move |mut node: BNode| {
                     assert!(node.num_bytes() <= BTREE_PAGE_SIZE as u16);
-                    assert!(
-                        node.cursor.get_ref().len() <= BTREE_PAGE_SIZE,
-                        "Underlying cursor is too big"
-                    );
                     let mut rng = rand::thread_rng();
                     let mut random_ptr: u64 = rng.gen();
                     while pages.borrow().contains_key(&random_ptr) {
@@ -406,6 +400,8 @@ mod tests {
         c.verify();
     }
 
+    // With BNode Cursor<Vec<u8>> time 6.75, 6.76, 6.73
+    // With BNode data: [u8; BTREE_PAGE_SIZE] time 3.78, 3.77, 3.78
     #[test]
     fn test_basic() {
         let mut c = C::new();
@@ -423,7 +419,6 @@ mod tests {
         // Delete tests
         for i in 2000..10000 {
             let key = format!("key{}", i);
-            println!("Deleting {}", key);
             assert!(c.delete(&key.to_string()));
         }
         c.verify();
@@ -459,7 +454,7 @@ mod tests {
         let mut c = C::new();
         let mut rng = rand::thread_rng();
         for i in 0..2000 {
-            let klen = fmix32(2*i+0) % BTREE_MAX_KEY_SIZE as u32;
+            let klen = fmix32(2*i) % BTREE_MAX_KEY_SIZE as u32;
             let vlen = fmix32(2*i+1) % BTREE_MAX_VAL_SIZE as u32;
             if klen == 0 {
                 continue;
