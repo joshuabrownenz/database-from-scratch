@@ -20,6 +20,19 @@ pub struct BTree {
 }
 
 impl BTree {
+    pub fn new_with_callbacks(
+        get: Box<dyn Fn(u64) -> BNode>,
+        new: Box<dyn Fn(BNode) -> u64>,
+        del: Box<dyn Fn(u64)>,
+    ) -> BTree {
+        BTree {
+            root: 0,
+            get,
+            new,
+            del,
+        }
+    }
+
     // insert a KV into a node, the result might be split into 2 nodes.
     // the caller is responsible for deallocating the input node
     // and splitting and allocating result nodes. Returns the result node which is double sized
@@ -125,12 +138,7 @@ impl BTree {
             let node_first_key = node.get_key(0);
             new_node.node_append_kv(idx + i as u16, (self.new)(node), &node_first_key, &vec![])
         }
-        new_node.node_append_range(
-            &old_node,
-            idx + num_new,
-            idx + 1,
-            old_num_keys - (idx + 1),
-        );
+        new_node.node_append_range(&old_node, idx + num_new, idx + 1, old_num_keys - (idx + 1));
 
         new_node
     }
@@ -223,6 +231,30 @@ impl BTree {
             self.root = (self.new)(splitted.remove(0));
         };
     }
+
+    pub fn get_value(&self, key: &Vec<u8>) -> Result<Vec<u8>, ()> {
+        assert!(!key.is_empty());
+        assert!(key.len() <= BTREE_MAX_KEY_SIZE);
+
+        if self.root == 0 {
+            return Err(());
+        };
+
+        let mut node = (self.get)(self.root);
+        loop {
+            let idx = node.node_lookup_le(&key);
+            match node.b_type() {
+                BNodeType::LEAF => match node.get_key(idx).cmp(key) {
+                    Ordering::Equal => return Ok(node.get_val(idx).clone()),
+                    _ => return Err(()),
+                },
+                BNodeType::NODE => {
+                    let ptr = node.get_ptr(idx);
+                    node = (self.get)(ptr);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -230,7 +262,8 @@ mod tests {
     use std::{
         cell::RefCell,
         collections::{HashMap, HashSet},
-        rc::Rc, iter::StepBy,
+        iter::StepBy,
+        rc::Rc,
     };
 
     use super::*;
@@ -250,9 +283,7 @@ mod tests {
 
             let get = {
                 let pages: Rc<RefCell<HashMap<u64, BNode>>> = Rc::clone(&pages);
-                Box::new(move |ptr| {
-                    pages.borrow().get(&ptr).unwrap().clone()
-                })
+                Box::new(move |ptr| pages.borrow().get(&ptr).unwrap().clone())
             };
 
             let new = {
@@ -454,8 +485,8 @@ mod tests {
         let mut c = C::new();
         let mut rng = rand::thread_rng();
         for i in 0..2000 {
-            let klen = fmix32(2*i) % BTREE_MAX_KEY_SIZE as u32;
-            let vlen = fmix32(2*i+1) % BTREE_MAX_VAL_SIZE as u32;
+            let klen = fmix32(2 * i) % BTREE_MAX_KEY_SIZE as u32;
+            let vlen = fmix32(2 * i + 1) % BTREE_MAX_VAL_SIZE as u32;
             if klen == 0 {
                 continue;
             }
@@ -478,7 +509,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         for l in (1..BTREE_MAX_KEY_SIZE + BTREE_MAX_VAL_SIZE).step_by(20) {
             let mut c = C::new();
-            
+
             let mut klen = l;
             if klen > BTREE_MAX_KEY_SIZE {
                 klen = BTREE_MAX_KEY_SIZE;
@@ -488,7 +519,7 @@ mod tests {
 
             let factor = BTREE_PAGE_SIZE / l;
             let mut size = factor * factor * 2;
-            
+
             if size > 2000 {
                 size = 2000;
             }
@@ -509,7 +540,6 @@ mod tests {
                 c.add(&key, &val);
             }
             c.verify();
-         }
-        
+        }
     }
 }

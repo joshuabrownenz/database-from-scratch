@@ -66,8 +66,13 @@ impl BNode {
         }
     }
 
-    pub fn get_data(&self) -> &[u8] {
-        &self.data[..self.actual_size]
+    pub fn copy(&mut self, data_in: &[u8; BTREE_PAGE_SIZE]) {
+        self.data[..BTREE_PAGE_SIZE].copy_from_slice(data_in);
+        self.actual_size = BTREE_PAGE_SIZE
+    }
+
+    pub fn get_data(self) -> [u8; BTREE_PAGE_SIZE] {
+        self.data[..BTREE_PAGE_SIZE].try_into().unwrap()
     }
 
     // Header
