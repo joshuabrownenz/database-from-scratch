@@ -1,7 +1,7 @@
 use crate::b_tree::b_node::{BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE};
 use std::cmp::Ordering;
 
-use super::b_node::{BNode, BNodeType, BTREE_PAGE_SIZE, HEADER};
+use super::b_node::{BNode, NodeType, BTREE_PAGE_SIZE, HEADER};
 
 enum MergeDirection {
     LEFT(BNode),
@@ -9,64 +9,68 @@ enum MergeDirection {
     NONE,
 }
 
+pub trait BTreePageManager {
+    fn page_get(&self, ptr: u64) -> BNode;
+    fn page_new(&mut self, node: BNode) -> u64;
+    fn page_del(&mut self, ptr: u64);
+}
+
 pub struct BTree {
     // pointer (a nonzero page number)
     pub root: u64,
-
-    // callbacks for managing on-disk pages (to keep the b-tree logic pure)
-    pub get: Box<dyn Fn(u64) -> BNode>,
-    pub new: Box<dyn Fn(BNode) -> u64>,
-    pub del: Box<dyn Fn(u64)>,
 }
 
 impl BTree {
-    pub fn new_with_callbacks(
-        get: Box<dyn Fn(u64) -> BNode>,
-        new: Box<dyn Fn(BNode) -> u64>,
-        del: Box<dyn Fn(u64)>,
-    ) -> BTree {
-        BTree {
-            root: 0,
-            get,
-            new,
-            del,
-        }
+    pub fn new() -> BTree {
+        BTree { root: 0 }
     }
 
     // insert a KV into a node, the result might be split into 2 nodes.
     // the caller is responsible for deallocating the input node
     // and splitting and allocating result nodes. Returns the result node which is double sized
-    fn tree_insert(&mut self, mut node_to_have_key: BNode, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
+    fn tree_insert<P: BTreePageManager>(
+        &mut self,
+        page_manager: &mut P,
+        node_to_have_key: BNode,
+        key: &Vec<u8>,
+        val: &Vec<u8>,
+    ) -> BNode {
         let new_node: BNode;
         // Where to insert
-        let idx = node_to_have_key.node_lookup_le(&key);
+        let idx = node_to_have_key.node_lookup_le(key);
 
         match node_to_have_key.b_type() {
-            BNodeType::LEAF => match node_to_have_key.get_key(idx).cmp(key) {
+            NodeType::LEAF => match node_to_have_key.get_key(idx).cmp(key) {
                 Ordering::Equal => node_to_have_key.leaf_update(idx, key, val),
                 _ => node_to_have_key.leaf_insert(idx + 1, key, val),
             },
-            BNodeType::NODE => self.node_insert(node_to_have_key, idx, key, val),
+            NodeType::NODE => self.node_insert(page_manager, node_to_have_key, idx, key, val),
         }
     }
 
-    fn tree_delete(&mut self, mut node_with_key: BNode, key: &Vec<u8>) -> Option<BNode> {
+    fn tree_delete<P: BTreePageManager>(
+        &mut self,
+        page_manager: &mut P,
+        mut node_with_key: BNode,
+        key: &Vec<u8>,
+    ) -> Option<BNode> {
         let new_node: BNode;
         // Where to insert
         let idx = node_with_key.node_lookup_le(&key);
 
         match node_with_key.b_type() {
-            BNodeType::LEAF => match node_with_key.get_key(idx).cmp(key) {
+            NodeType::LEAF => match node_with_key.get_key(idx).cmp(key) {
                 Ordering::Equal => Some(node_with_key.leaf_delete(idx)),
                 _ => None,
             },
-            BNodeType::NODE => self.node_delete(node_with_key, idx, key),
+            NodeType::NODE => self.node_delete(page_manager, node_with_key, idx, key),
         }
     }
 
     /** inserts a key into an internal node, the result will be a double sized node */
-    fn node_insert(
+    fn node_insert<P: BTreePageManager>(
         &mut self,
+        page_manager: &mut P,
         node_to_have_key: BNode,
         idx: u16,
         key: &Vec<u8>,
@@ -74,53 +78,82 @@ impl BTree {
     ) -> BNode {
         // get and deallocate the kid node
         let kid_ptr = node_to_have_key.get_ptr(idx);
-        let mut kid_node = (self.get)(kid_ptr);
-        (self.del)(kid_ptr);
+        let mut kid_node = page_manager.page_get(kid_ptr);
+        page_manager.page_del(kid_ptr);
 
         //recursive insertion to the kid node
-        kid_node = self.tree_insert(kid_node, key, val);
+        kid_node = self.tree_insert(page_manager, kid_node, key, val);
 
         //split the result
         let (n_split, splited) = kid_node.split3();
 
         // update the kids links
-        self.node_replace_kid_n(2 * BTREE_PAGE_SIZE, node_to_have_key, idx, splited)
+        self.node_replace_kid_n(
+            page_manager,
+            2 * BTREE_PAGE_SIZE,
+            node_to_have_key,
+            idx,
+            splited,
+        )
     }
 
-    fn node_delete(&mut self, node_with_key: BNode, idx: u16, key: &Vec<u8>) -> Option<BNode> {
+    fn node_delete<P: BTreePageManager>(
+        &mut self,
+        page_manager: &mut P,
+        node_with_key: BNode,
+        idx: u16,
+        key: &Vec<u8>,
+    ) -> Option<BNode> {
         // recurse into the kid
         let kid_ptr = node_with_key.get_ptr(idx);
-        let node_with_key_removed = self.tree_delete((self.get)(kid_ptr), key);
+        let node_with_key_removed =
+            self.tree_delete(page_manager, page_manager.page_get(kid_ptr), key);
         node_with_key_removed.as_ref()?;
 
         let mut updated_node = node_with_key_removed.unwrap();
-        (self.del)(kid_ptr);
+        page_manager.page_del(kid_ptr);
 
         // merge or redistribute
-        let merge_direction = self.should_merge(&node_with_key, idx, &mut updated_node);
+        let merge_direction =
+            self.should_merge(page_manager, &node_with_key, idx, &mut updated_node);
         Some(match merge_direction {
             MergeDirection::LEFT(sibling) => {
                 let mut merged = sibling.node_merge(updated_node);
-                (self.del)(node_with_key.get_ptr(idx - 1));
+                page_manager.page_del(node_with_key.get_ptr(idx - 1));
                 let merged_first_key = merged.get_key(0);
-                node_with_key.node_replace_2_kid(idx - 1, (self.new)(merged), &merged_first_key)
+                node_with_key.node_replace_2_kid(
+                    idx - 1,
+                    page_manager.page_new(merged),
+                    &merged_first_key,
+                )
             }
             MergeDirection::RIGHT(sibling) => {
                 let mut merged = updated_node.node_merge(sibling);
-                (self.del)(node_with_key.get_ptr(idx + 1));
+                page_manager.page_del(node_with_key.get_ptr(idx + 1));
                 let merged_first_key = merged.get_key(0);
-                node_with_key.node_replace_2_kid(idx, (self.new)(merged), &merged_first_key)
+                node_with_key.node_replace_2_kid(
+                    idx,
+                    page_manager.page_new(merged),
+                    &merged_first_key,
+                )
             }
             MergeDirection::NONE => {
                 assert!(updated_node.num_keys() > 0);
-                self.node_replace_kid_n(BTREE_PAGE_SIZE, node_with_key, idx, vec![updated_node])
+                self.node_replace_kid_n(
+                    page_manager,
+                    BTREE_PAGE_SIZE,
+                    node_with_key,
+                    idx,
+                    vec![updated_node],
+                )
             }
         })
     }
 
     /** Replace the kid node with the new children (2 or 3) */
-    fn node_replace_kid_n(
+    fn node_replace_kid_n<P: BTreePageManager>(
         &mut self,
+        page_manager: &mut P,
         new_node_size: usize,
         old_node: BNode,
         idx: u16,
@@ -132,19 +165,25 @@ impl BTree {
 
         // Replacing one old child node with new children (2 or 3)
         let mut new_node =
-            BNode::new_with_size(BNodeType::NODE, old_num_keys - 1 + num_new, new_node_size);
+            BNode::new_with_size(NodeType::NODE, old_num_keys - 1 + num_new, new_node_size);
         new_node.node_append_range(&old_node, 0, 0, idx);
         for (i, mut node) in new_children.into_iter().enumerate() {
             let node_first_key = node.get_key(0);
-            new_node.node_append_kv(idx + i as u16, (self.new)(node), &node_first_key, &vec![])
+            new_node.node_append_kv(
+                idx + i as u16,
+                page_manager.page_new(node),
+                &node_first_key,
+                &vec![],
+            )
         }
         new_node.node_append_range(&old_node, idx + num_new, idx + 1, old_num_keys - (idx + 1));
 
         new_node
     }
 
-    fn should_merge(
+    fn should_merge<P: BTreePageManager>(
         &self,
+        page_manager: &P,
         node_with_key: &BNode,
         idx: u16,
         updated_node: &BNode,
@@ -154,7 +193,7 @@ impl BTree {
         }
 
         if idx > 0 {
-            let mut sibling: BNode = (self.get)(node_with_key.get_ptr(idx - 1));
+            let mut sibling: BNode = page_manager.page_get(node_with_key.get_ptr(idx - 1));
             let merged_size = sibling.num_bytes() + updated_node.num_bytes() - HEADER;
 
             if merged_size <= BTREE_PAGE_SIZE as u16 {
@@ -163,7 +202,7 @@ impl BTree {
         }
 
         if idx + 1 < node_with_key.num_keys() {
-            let mut sibling: BNode = (self.get)(node_with_key.get_ptr(idx + 1));
+            let mut sibling: BNode = page_manager.page_get(node_with_key.get_ptr(idx + 1));
             let merged_size = sibling.num_bytes() + updated_node.num_bytes() - HEADER;
 
             if merged_size <= BTREE_PAGE_SIZE as u16 {
@@ -174,7 +213,7 @@ impl BTree {
         MergeDirection::NONE
     }
 
-    pub fn Delete(&mut self, key: &Vec<u8>) -> bool {
+    pub fn Delete<P: BTreePageManager>(&mut self, page_manager: &mut P, key: &Vec<u8>) -> bool {
         assert!(!key.is_empty());
         assert!(key.len() <= BTREE_MAX_KEY_SIZE);
 
@@ -182,57 +221,67 @@ impl BTree {
             return false;
         };
 
-        let node_with_removed_key = self.tree_delete((self.get)(self.root), key);
+        let node_with_removed_key =
+            self.tree_delete(page_manager, page_manager.page_get(self.root), key);
         if node_with_removed_key.is_none() {
             return false;
         };
         let mut updated_node = node_with_removed_key.unwrap();
 
-        (self.del)(self.root);
-        if updated_node.b_type() == BNodeType::NODE && updated_node.num_keys() == 1 {
+        page_manager.page_del(self.root);
+        if updated_node.b_type() == NodeType::NODE && updated_node.num_keys() == 1 {
             // Remove a level
             self.root = updated_node.get_ptr(0);
         } else {
-            self.root = (self.new)(updated_node);
+            self.root = page_manager.page_new(updated_node);
         };
 
         true
     }
 
-    pub fn Insert(&mut self, key: &Vec<u8>, val: &Vec<u8>) {
+    pub fn Insert<P: BTreePageManager>(
+        &mut self,
+        page_manager: &mut P,
+        key: &Vec<u8>,
+        val: &Vec<u8>,
+    ) {
         assert!(!key.is_empty());
         assert!(key.len() <= BTREE_MAX_KEY_SIZE);
         assert!(val.len() <= BTREE_MAX_VAL_SIZE);
 
         if self.root == 0 {
-            let mut root = BNode::new(BNodeType::LEAF, 2);
+            let mut root = BNode::new(NodeType::LEAF, 2);
 
             root.node_append_kv(0, 0, &vec![], &vec![]);
             root.node_append_kv(1, 0, key, val);
-            self.root = (self.new)(root);
+            self.root = page_manager.page_new(root);
             return;
         };
 
-        let node = (self.get)(self.root);
-        (self.del)(self.root);
+        let node = page_manager.page_get(self.root);
+        page_manager.page_del(self.root);
 
-        let node = self.tree_insert(node, key, val);
+        let node = self.tree_insert(page_manager, node, key, val);
         let (n_split, mut splitted) = node.split3();
         if n_split > 1 {
             // the root was split, add a new level
-            let mut root = BNode::new(BNodeType::NODE, n_split);
+            let mut root = BNode::new(NodeType::NODE, n_split);
             for (i, mut k_node) in splitted.into_iter().enumerate() {
                 let key = k_node.get_key(0);
-                let ptr = (self.new)(k_node);
+                let ptr = page_manager.page_new(k_node);
                 root.node_append_kv(i as u16, ptr, &key, &vec![]);
             }
-            self.root = (self.new)(root);
+            self.root = page_manager.page_new(root);
         } else {
-            self.root = (self.new)(splitted.remove(0));
+            self.root = page_manager.page_new(splitted.remove(0));
         };
     }
 
-    pub fn get_value(&self, key: &Vec<u8>) -> Result<Vec<u8>, ()> {
+    pub fn get_value<P: BTreePageManager>(
+        &self,
+        page_manager: &P,
+        key: &Vec<u8>,
+    ) -> Result<Vec<u8>, ()> {
         assert!(!key.is_empty());
         assert!(key.len() <= BTREE_MAX_KEY_SIZE);
 
@@ -240,17 +289,17 @@ impl BTree {
             return Err(());
         };
 
-        let mut node = (self.get)(self.root);
+        let mut node = page_manager.page_get(self.root);
         loop {
             let idx = node.node_lookup_le(&key);
             match node.b_type() {
-                BNodeType::LEAF => match node.get_key(idx).cmp(key) {
-                    Ordering::Equal => return Ok(node.get_val(idx).clone()),
+                NodeType::LEAF => match node.get_key(idx).cmp(key) {
+                    Ordering::Equal => return Ok(node.get_val(idx)),
                     _ => return Err(()),
                 },
-                BNodeType::NODE => {
+                NodeType::NODE => {
                     let ptr = node.get_ptr(idx);
-                    node = (self.get)(ptr);
+                    node = page_manager.page_get(ptr);
                 }
             }
         }
@@ -271,78 +320,96 @@ mod tests {
 
     use rand::Rng;
 
+    struct PageManager {
+        pub pages: HashMap<u64, BNode>,
+    }
+
+    impl PageManager {
+        fn new() -> PageManager {
+            PageManager {
+                pages: HashMap::<u64, BNode>::new(),
+            }
+        }
+
+        fn get_page(&self, ptr: u64) -> BNode {
+            self.pages.get(&ptr).unwrap().clone()
+        }
+
+        fn new_page(&mut self, mut node: BNode) -> u64 {
+            assert!(node.num_bytes() <= BTREE_PAGE_SIZE as u16);
+            let mut rng = rand::thread_rng();
+            let mut random_ptr: u64 = rng.gen();
+            while self.pages.contains_key(&random_ptr) {
+                random_ptr = rng.gen();
+            }
+            self.pages.insert(random_ptr, node);
+            random_ptr
+        }
+
+        fn del_page(&mut self, ptr: u64) {
+            self.pages.remove(&ptr);
+        }
+    }
+
+    impl BTreePageManager for PageManager {
+        fn page_new(&mut self, node: BNode) -> u64 {
+            self.new_page(node)
+        }
+
+        fn page_get(&self, ptr: u64) -> BNode {
+            self.get_page(ptr)
+        }
+
+        fn page_del(&mut self, ptr: u64) {
+            self.del_page(ptr);
+        }
+    }
+
     struct C {
         pub tree: BTree,
         pub reference: HashMap<String, String>,
-        pub pages: Rc<RefCell<HashMap<u64, BNode>>>,
+        pub page_manager: PageManager,
     }
     impl C {
         fn new() -> C {
-            let pages: Rc<RefCell<HashMap<u64, BNode>>> =
-                Rc::new(RefCell::new(HashMap::<u64, BNode>::new()));
-
-            let get = {
-                let pages: Rc<RefCell<HashMap<u64, BNode>>> = Rc::clone(&pages);
-                Box::new(move |ptr| pages.borrow().get(&ptr).unwrap().clone())
-            };
-
-            let new = {
-                let pages: Rc<RefCell<HashMap<u64, BNode>>> = Rc::clone(&pages);
-                Box::new(move |mut node: BNode| {
-                    assert!(node.num_bytes() <= BTREE_PAGE_SIZE as u16);
-                    let mut rng = rand::thread_rng();
-                    let mut random_ptr: u64 = rng.gen();
-                    while pages.borrow().contains_key(&random_ptr) {
-                        random_ptr = rng.gen();
-                    }
-                    pages.borrow_mut().insert(random_ptr, node);
-                    random_ptr
-                })
-            };
-
-            let del = {
-                let pages: Rc<RefCell<HashMap<u64, BNode>>> = Rc::clone(&pages);
-                Box::new(move |ptr| {
-                    pages.borrow_mut().remove(&ptr);
-                })
-            };
+            let page_manager = PageManager::new();
 
             C {
-                tree: BTree {
-                    root: 0,
-                    get,
-                    new,
-                    del,
-                },
+                tree: BTree { root: 0 },
                 reference: HashMap::new(),
-                pages,
+                page_manager,
             }
         }
 
         fn add(&mut self, key: &str, val: &str) {
-            self.tree
-                .Insert(&key.as_bytes().to_vec(), &val.as_bytes().to_vec());
+            self.tree.Insert(
+                &mut self.page_manager,
+                &key.as_bytes().to_vec(),
+                &val.as_bytes().to_vec(),
+            );
             self.reference.insert(key.to_string(), val.to_string());
         }
 
         fn delete(&mut self, key: &str) -> bool {
             let remove = self.reference.remove(key);
-            let did_remove = self.tree.Delete(&key.as_bytes().to_vec());
+            let did_remove = self
+                .tree
+                .Delete(&mut self.page_manager, &key.as_bytes().to_vec());
             assert_eq!(remove.is_some(), did_remove);
             did_remove
         }
 
         fn node_dump(&mut self, ptr: u64, keys: &mut Vec<String>, vals: &mut Vec<String>) {
-            let mut node = (self.tree.get)(ptr);
+            let mut node = self.page_manager.get_page(ptr);
             let n_keys = node.num_keys();
             match node.b_type() {
-                BNodeType::NODE => {
+                NodeType::NODE => {
                     for i in 0..n_keys {
                         let ptr = node.get_ptr(i);
                         self.node_dump(ptr, keys, vals);
                     }
                 }
-                BNodeType::LEAF => {
+                NodeType::LEAF => {
                     for i in 0..n_keys {
                         let key = node.get_key(i).clone();
                         keys.push(String::from_utf8(key).unwrap());
@@ -366,13 +433,13 @@ mod tests {
         fn node_verify(&self, mut node: BNode) {
             let num_keys = node.num_keys();
             assert!(num_keys >= 1);
-            if node.b_type() == BNodeType::LEAF {
+            if node.b_type() == NodeType::LEAF {
                 return;
             };
 
             for i in 0..num_keys {
                 let key = node.get_key(i);
-                let mut kid = (self.tree.get)(node.get_ptr(i));
+                let mut kid = self.page_manager.page_get(node.get_ptr(i));
                 assert_eq!(
                     kid.get_key(0),
                     key,
@@ -401,7 +468,7 @@ mod tests {
             }
 
             // Verify node relationships are correct
-            self.node_verify((self.tree.get)(self.tree.root));
+            self.node_verify(self.page_manager.page_get(self.tree.root));
         }
     }
 
@@ -433,6 +500,7 @@ mod tests {
 
     // With BNode Cursor<Vec<u8>> time 6.75, 6.76, 6.73
     // With BNode data: [u8; BTREE_PAGE_SIZE] time 3.78, 3.77, 3.78
+    // With PageManager Trait time 3.66, 3.70
     #[test]
     fn test_basic() {
         let mut c = C::new();
@@ -476,8 +544,8 @@ mod tests {
         c.verify();
 
         // The dummy empty key
-        assert_eq!(1, c.pages.borrow().len());
-        assert_eq!(1, (c.tree.get)(c.tree.root).num_keys());
+        assert_eq!(1, c.page_manager.pages.len());
+        assert_eq!(1, c.page_manager.page_get(c.tree.root).num_keys());
     }
 
     #[test]

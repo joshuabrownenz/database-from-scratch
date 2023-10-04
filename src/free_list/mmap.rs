@@ -1,7 +1,7 @@
 extern crate libc;
 extern crate memmap2; // Use the memmap2 crate for memory-mapped file support // Use the libc crate for the mmap flags
 
-use crate::b_tree::b_node::{BNode, BTREE_PAGE_SIZE};
+use crate::b_tree::b_node::{BNode, Node, BTREE_PAGE_SIZE};
 use memmap2::{MmapMut, MmapOptions};
 use std::fs::File;
 use std::io::{self, Error, ErrorKind};
@@ -77,10 +77,16 @@ impl MMap {
         panic!("bad pointer");
     }
 
-    pub fn page_get(&self, ptr: u64) -> BNode {
+    pub fn page_get_mapped<T: Node>(&self, ptr: u64) -> T {
         let (chunk_index, offset) = self.get_offset_of_ptr(ptr);
         let chunk = &self.chunks[chunk_index];
-        BNode::from(&chunk[offset as usize..offset as usize + BTREE_PAGE_SIZE])
+        T::from(&chunk[offset as usize..offset as usize + BTREE_PAGE_SIZE])
+    }
+
+    pub fn page_get_mapped_raw_mut(&mut self, ptr: u64) -> &mut [u8] {
+        let (chunk_index, offset) = self.get_offset_of_ptr(ptr);
+        let chunk = &mut self.chunks[chunk_index];
+        &mut chunk[offset as usize..offset as usize + BTREE_PAGE_SIZE]
     }
 
     pub fn page_set(&mut self, ptr: u64, value: &[u8; BTREE_PAGE_SIZE]) {
