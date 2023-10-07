@@ -40,7 +40,7 @@ impl PageManager {
         }
     }
 
-    // callback for free list, allocate a new page, do not borrow free
+    // callback for free list, allocate a new page
     pub fn page_append(&mut self, node: FLNode) -> u64 {
         let ptr = self.page.flushed + self.page.nappend as u64;
         self.page.nappend += 1;
@@ -48,7 +48,7 @@ impl PageManager {
         ptr
     }
 
-    // callback for free list, reuse a page, do not borrow free
+    // callback for free list, reuse a page
     pub fn page_reuse(&mut self, ptr: u64, node: FLNode) {
         self.page.updates.insert(ptr, Some(node.get_data()));
     }

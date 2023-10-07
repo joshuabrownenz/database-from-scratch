@@ -34,7 +34,7 @@ impl FreeList {
     pub fn get(&self, mut topn: i64) -> u64 {
         assert!(0 <= topn && topn < self.total());
         assert!(self.head != 0);
-        let mut node = self.page_manager.page_get_flnode(self.head);
+        let mut node: FLNode = self.page_manager.page_get_flnode(self.head);
         while node.size() as i64 <= topn {
             topn -= node.size() as i64;
             let next = node.next();
@@ -47,7 +47,7 @@ impl FreeList {
     pub fn page_new(&mut self, node: BNode) -> u64 {
         let ptr: u64;
         let total = self.total();
-        if self.page_manager.page.nfree < total{
+        if self.page_manager.page.nfree < total {
             // reuse deallocated page
             ptr = self.get(self.page_manager.page.nfree);
             self.page_manager.page.nfree += 1;
@@ -84,7 +84,8 @@ impl FreeList {
                 popn = 0;
                 // reuse pointers from the free list
                 while remain > 0
-                    && reuse.len() * MAX_FREE_LIST_IN_PAGE < freed_ptrs.len() + remain as usize
+                    && reuse.len() * MAX_FREE_LIST_IN_PAGE < freed_ptrs.len()// + remain as usize
+                // Maybe check this
                 {
                     remain -= 1;
                     reuse.push_back(node.get_ptr(remain));
@@ -137,6 +138,7 @@ impl FreeList {
         }
         assert!(reuse.is_empty());
     }
+    
 }
 
 impl BTreePageManager for FreeList {
@@ -152,3 +154,38 @@ impl BTreePageManager for FreeList {
         self.page_manager.page_del(ptr)
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use std::fs;
+
+//     use crate::b_tree::b_node::BTREE_PAGE_SIZE;
+
+//     use super::*;
+//     extern crate rand;
+
+//     fn new_fl(path: &str, delete_old: bool) -> FreeList {
+//         fs::create_dir_all("test_run_dir").unwrap();
+//         let file_name = format!("test_run_dir/{}", path);
+//         if delete_old {
+//             fs::remove_file(&file_name);
+//         }
+//         let fp = fs::OpenOptions::new()
+//             .read(true)
+//             .write(true)
+//             .create(true)
+//             .open(&file_name)
+//             .unwrap();
+//         FreeList::new(&fp).unwrap()
+//     }
+
+//     #[test]
+//     fn test_fl_full_node() {
+//         // Create 509 pages
+//         let mut fl = new_fl("test_fl_full_node", true);
+//         for i in 0..509 {
+//             fl.page_new(BNode::from(&[i as u8; BTREE_PAGE_SIZE]));
+//             fl.update(0, freed_ptrs);
+//         }
+//     }
+// }

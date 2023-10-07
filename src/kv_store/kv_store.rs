@@ -243,9 +243,15 @@ mod tests {
         rc::Rc,
     };
 
+    use crate::{
+        b_tree::{b_node::NodeType, b_tree::BTreePageManager},
+        free_list::{fl_node::MAX_FREE_LIST_IN_PAGE, page},
+    };
+
     use super::*;
     extern crate rand;
 
+    use libc::free;
     use rand::Rng;
 
     fn new_kv(path: &str, delete_old: bool) -> KV {
@@ -255,6 +261,31 @@ mod tests {
             fs::remove_file(&file_name);
         }
         KV::open(file_name).unwrap()
+    }
+
+    fn debug_free_list(kv: &KV) {
+        let mut head = kv.free.head;
+        if head == 0 {
+            println!("free list is empty");
+            return;
+        }
+
+        println!("Start");
+        while head != 0 {
+            let free_node = kv.free.page_manager.page_get_flnode(head);
+            println!("Page {}: {:?}", head, free_node);
+            head = free_node.next();
+        }
+        println!("End");
+    }
+
+    fn get_free_list_total(kv: &KV) -> u64 {
+        let mut head = kv.free.head;
+        if head == 0 {
+            0
+        } else {
+            kv.free.page_manager.page_get_flnode(head).total()
+        }
     }
 
     #[test]
@@ -283,6 +314,7 @@ mod tests {
             let result = kv.get(&key).unwrap();
             assert_eq!(value, result);
         }
+        debug_free_list(&kv);
 
         kv.close();
     }
@@ -292,37 +324,86 @@ mod tests {
     #[test]
     fn test_kv() {
         let mut kv = new_kv("test_kv.db", true);
-        let mut data = [0; BTREE_PAGE_SIZE];
 
-        for i in 0..50000 {
+        let mut deleted_keys: HashSet<i32> = HashSet::new();
+        let mut rng = rand::thread_rng();
+        for i in 0..2000000 {
             let key = format!("key{}", i).as_bytes().to_vec();
             let value = format!("value{}", i).as_bytes().to_vec();
             kv.set(&key, &value).unwrap();
+            if i != 0 && i % 5 == 0 {
+                let to_delete = rng.gen_range(0..i);
+                if !deleted_keys.contains(&to_delete) {
+                    let key = format!("key{}", to_delete).as_bytes().to_vec();
+                    kv.del(&key).unwrap();
+                    if rng.gen_bool(0.5) {
+                        let value = format!("value{}", to_delete).as_bytes().to_vec();
+                        kv.set(&key, &value).unwrap();
+                    } else {
+                        deleted_keys.insert(to_delete);
+                    }
+                }
+            }
         }
 
         kv.close();
 
         let mut kv = new_kv("test_kv.db", false);
-        for i in 0..50000 {
+        for i in 0..2000000 {
             let key = format!("key{}", i).as_bytes().to_vec();
             let value = format!("value{}", i).as_bytes().to_vec();
-            let result = kv.get(&key).unwrap();
-            assert_eq!(value, result);
-            if i == 36754 {
-                let free_node = kv.free.page_manager.page_get_flnode(kv.free.head);
+            let result = kv.get(&key);
+            if deleted_keys.contains(&i) {
+                assert!(result.is_err());
+            } else {
+                assert_eq!(result.unwrap(), value);
             }
+            println!("{}: FL.total() = {}", i, get_free_list_total(&kv));
             // Currently fails on i = 36754
             kv.del(&key).unwrap();
         }
 
         kv.close();
         let mut kv = new_kv("test_kv.db", false);
-        for i in 0..50000 {
+        for i in 0..2000000 {
             let key = format!("key{}", i).as_bytes().to_vec();
             let result = kv.get(&key);
             assert!(result.is_err());
         }
-        let free_node = kv.free.page_manager.page_get_flnode(kv.free.head);
         kv.close();
+    }
+
+    #[test]
+    fn test_fl_full_node() {
+        let mut kv = new_kv("test_fl_full_node.db", true);
+
+        let mut pages: HashSet<u64> = HashSet::new();
+        let mut free_pages: u64 = 0;
+        for i in 0..15 * MAX_FREE_LIST_IN_PAGE {
+            let new_page = kv.free.page_new(BNode::new(NodeType::LEAF, 0));
+            free_pages = free_pages.saturating_sub(1);
+            assert!(!pages.contains(&new_page));
+            pages.insert(new_page);
+            if i != 0 && i % 10 == 0 && pages.contains(&(new_page - 5)) {
+                kv.free.page_del(new_page - 5);
+                free_pages += 1;
+                pages.remove(&(new_page - 5));
+            }
+            kv.flush_pages().unwrap();
+
+            // Assert free list matchs
+        }
+
+        for page in pages {
+            kv.free.page_del(page);
+            kv.flush_pages().unwrap();
+            let head = kv.free.head;
+
+            assert!(head != 0 || free_pages == 0);
+            if free_pages > 0 {
+                let free_node = kv.free.page_manager.page_get_flnode(head);
+                assert_eq!(free_pages, free_node.total());
+            }
+        }
     }
 }

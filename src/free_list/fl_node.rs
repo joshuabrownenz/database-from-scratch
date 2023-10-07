@@ -1,4 +1,6 @@
 extern crate byteorder;
+use std::fmt::Debug;
+
 use byteorder::{ByteOrder, LittleEndian};
 
 use crate::b_tree::b_node::{Node, BTREE_PAGE_SIZE};
@@ -96,5 +98,25 @@ impl FLNode {
     pub fn num_bytes(&self) -> u16 {
         let size: u16 = self.size();
         FL_HEADER + U64_SIZE as u16 * size
+    }
+}
+
+impl Debug for FLNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let size: u16 = self.size();
+        let total: u64 = self.total();
+        let next: u64 = self.next();
+        let mut ptrs: Vec<u64> = Vec::new();
+        for i in 0..size {
+            ptrs.push(self.get_ptr(i));
+        }
+        write!(
+            f,
+            "FLNode {{ size: {}, total: {}, next: {}, num_ptrs: {} }}",
+            size,
+            total,
+            next,
+            ptrs.len()
+        )
     }
 }
