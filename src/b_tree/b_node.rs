@@ -193,16 +193,23 @@ impl BNode {
     // returns the first kid node whose range intersects the key. (kid[i] <= key)
     // TODO: bisect
     pub fn node_lookup_le(&self, key: &Vec<u8>) -> u16 {
-        let mut found = 0;
-        // the first key is a copy from the parent node,
-        // thus it's always less than or equal to the key.
-        for i in 1..self.num_keys() {
-            let cmp = self.get_key(i).cmp(key);
-            if cmp == std::cmp::Ordering::Less || cmp == std::cmp::Ordering::Equal {
-                found = i;
-            }
-            if cmp == std::cmp::Ordering::Greater {
-                break;
+        let mut low: u16 = 1;
+        let mut high: u16 = self.num_keys() - 1;
+        let mut found: u16 = 0;
+    
+        while low <= high {
+            let mid = (low + high) / 2;
+            let cmp = self.get_key(mid).cmp(key);
+    
+            match cmp {
+                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
+                    found = mid;
+                    low = mid + 1;
+                },
+                std::cmp::Ordering::Greater => {
+                    high = mid.saturating_sub(1);
+                },
+                _ => {}
             }
         }
         found
