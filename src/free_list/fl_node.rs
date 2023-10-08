@@ -13,7 +13,6 @@ pub const FL_NODE_TYPE: u16 = 3;
 pub const FL_HEADER: u16 = 4 + 8 + 8;
 pub const MAX_FREE_LIST_IN_PAGE: usize = (BTREE_PAGE_SIZE - FL_HEADER as usize) / 8;
 
-pub const U16_SIZE: usize = 2;
 pub const U64_SIZE: usize = 8;
 
 impl Node for FLNode {
@@ -48,10 +47,6 @@ impl FLNode {
         // Makes sure not is of valid type
         assert!(LittleEndian::read_u16(&new_node.data[..2]) == FL_NODE_TYPE);
         new_node
-    }
-
-    pub fn copy(&mut self, data_in: &[u8; BTREE_PAGE_SIZE]) {
-        self.data[..BTREE_PAGE_SIZE].copy_from_slice(data_in);
     }
 
     pub fn get_data(self) -> [u8; BTREE_PAGE_SIZE] {
@@ -92,12 +87,6 @@ impl FLNode {
         assert!(idx < self.size());
         let pos: usize = FL_HEADER as usize + U64_SIZE * idx as usize;
         LittleEndian::write_u64(&mut self.data[pos..pos + U64_SIZE], ptr)
-    }
-
-    // node size in bytes
-    pub fn num_bytes(&self) -> u16 {
-        let size: u16 = self.size();
-        FL_HEADER + U64_SIZE as u16 * size
     }
 }
 

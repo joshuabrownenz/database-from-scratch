@@ -1,5 +1,5 @@
 extern crate byteorder;
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian};
 use std::vec::Vec;
 
 // node format:
@@ -21,8 +21,8 @@ pub const U64_SIZE: usize = 8;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum NodeType {
-    NODE = 1,
-    LEAF = 2,
+    Node = 1,
+    Leaf = 2,
 }
 
 impl NodeType {
@@ -74,7 +74,7 @@ impl BNode {
     pub fn from(data_in: &[u8]) -> BNode {
         assert!(data_in.len() == BTREE_PAGE_SIZE);
         let mut data = [0; 2 * BTREE_PAGE_SIZE];
-        data[..BTREE_PAGE_SIZE].copy_from_slice(&data_in);
+        data[..BTREE_PAGE_SIZE].copy_from_slice(data_in);
         let new_node = BNode {
             data,
             actual_size: BTREE_PAGE_SIZE,
@@ -82,11 +82,6 @@ impl BNode {
         // Makes sure not is of valid type
         new_node.b_type();
         new_node
-    }
-
-    pub fn copy(&mut self, data_in: &[u8; BTREE_PAGE_SIZE]) {
-        self.data[..BTREE_PAGE_SIZE].copy_from_slice(data_in);
-        self.actual_size = BTREE_PAGE_SIZE
     }
 
     pub fn get_data(self) -> [u8; BTREE_PAGE_SIZE] {
@@ -101,8 +96,8 @@ impl BNode {
 
     pub fn b_type(&self) -> NodeType {
         match LittleEndian::read_u16(&self.data[..2]) {
-            1 => NodeType::NODE,
-            2 => NodeType::LEAF,
+            1 => NodeType::Node,
+            2 => NodeType::Leaf,
             n => panic!("Invalid BNode type {}", n),
         }
     }
@@ -148,7 +143,7 @@ impl BNode {
     pub fn kv_pos(&self, idx: u16) -> u16 {
         let num_keys = self.num_keys();
         assert!(idx <= num_keys);
-        HEADER as u16 + 10 * num_keys + self.get_offset(idx)
+        HEADER + 10 * num_keys + self.get_offset(idx)
     }
 
     pub fn get_key(&self, idx: u16) -> Vec<u8> {
@@ -161,8 +156,7 @@ impl BNode {
         let key_length = LittleEndian::read_u16(&self.data[pos..pos + U16_SIZE]);
 
         let key_pos = pos + 4;
-        let mut key = self.data[key_pos..key_pos + key_length as usize].to_vec();
-        key
+        self.data[key_pos..key_pos + key_length as usize].to_vec()
     }
 
     pub fn get_val(&self, idx: u16) -> Vec<u8> {
@@ -196,31 +190,30 @@ impl BNode {
         let mut low: u16 = 1;
         let mut high: u16 = self.num_keys() - 1;
         let mut found: u16 = 0;
-    
+
         while low <= high {
             let mid = (low + high) / 2;
             let cmp = self.get_key(mid).cmp(key);
-    
+
             match cmp {
                 std::cmp::Ordering::Less | std::cmp::Ordering::Equal => {
                     found = mid;
                     low = mid + 1;
-                },
+                }
                 std::cmp::Ordering::Greater => {
                     high = mid.saturating_sub(1);
-                },
-                _ => {}
+                }
             }
         }
         found
     }
 
     /** Add a new key to a leaf node. Returns a double sized node which needs to be dealt with */
-    pub fn leaf_insert(mut self, idx: u16, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
+    pub fn leaf_insert(self, idx: u16, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
         let old_num_keys = self.num_keys();
 
         let mut new_node =
-            BNode::new_with_size(NodeType::LEAF, old_num_keys + 1, 2 * BTREE_PAGE_SIZE);
+            BNode::new_with_size(NodeType::Leaf, old_num_keys + 1, 2 * BTREE_PAGE_SIZE);
         new_node.node_append_range(&self, 0, 0, idx);
         new_node.node_append_kv(idx, 0, key, val);
         new_node.node_append_range(&self, idx + 1, idx, old_num_keys - idx);
@@ -229,10 +222,10 @@ impl BNode {
     }
 
     /** Update a key in a leaf node. Returns a double sized node which needs to be dealt with */
-    pub fn leaf_update(mut self, idx: u16, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
+    pub fn leaf_update(self, idx: u16, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
         let old_num_keys = self.num_keys();
 
-        let mut new_node = BNode::new_with_size(NodeType::LEAF, old_num_keys, 2 * BTREE_PAGE_SIZE);
+        let mut new_node = BNode::new_with_size(NodeType::Leaf, old_num_keys, 2 * BTREE_PAGE_SIZE);
         new_node.node_append_range(&self, 0, 0, idx);
         new_node.node_append_kv(idx, 0, key, val);
         new_node.node_append_range(&self, idx + 1, idx + 1, old_num_keys - idx - 1);
@@ -240,17 +233,17 @@ impl BNode {
         new_node
     }
 
-    pub fn leaf_delete(mut self, idx: u16) -> BNode {
+    pub fn leaf_delete(self, idx: u16) -> BNode {
         let old_num_keys = self.num_keys();
 
-        let mut new_node = BNode::new(NodeType::LEAF, old_num_keys - 1);
+        let mut new_node = BNode::new(NodeType::Leaf, old_num_keys - 1);
         new_node.node_append_range(&self, 0, 0, idx);
         new_node.node_append_range(&self, idx, idx + 1, old_num_keys - idx - 1);
 
         new_node
     }
 
-    pub fn node_merge(mut self, mut right: BNode) -> BNode {
+    pub fn node_merge(self, right: BNode) -> BNode {
         let left_num_keys = self.num_keys();
         let right_num_keys = right.num_keys();
         let new_num_keys = left_num_keys + right_num_keys;
@@ -262,9 +255,9 @@ impl BNode {
         new_node
     }
 
-    pub fn node_replace_2_kid(mut self, idx: u16, ptr: u64, key: &Vec<u8>) -> BNode {
+    pub fn node_replace_2_kid(self, idx: u16, ptr: u64, key: &Vec<u8>) -> BNode {
         let old_num_keys = self.num_keys();
-        let mut new_node = BNode::new(NodeType::NODE, old_num_keys - 1);
+        let mut new_node = BNode::new(NodeType::Node, old_num_keys - 1);
 
         new_node.node_append_range(&self, 0, 0, idx);
         new_node.node_append_kv(idx, ptr, key, &vec![]);
@@ -382,7 +375,7 @@ impl BNode {
             return (2, vec![left_node, right_node]);
         };
 
-        let (mut left_left_node, middle_node) = left_node.split2(BTREE_PAGE_SIZE);
+        let (left_left_node, middle_node) = left_node.split2(BTREE_PAGE_SIZE);
         assert!(left_left_node.num_bytes() <= BTREE_PAGE_SIZE as u16);
         (3, vec![left_left_node, middle_node, right_node])
     }
@@ -406,14 +399,14 @@ mod tests {
 
     #[test]
     fn test_bnode_creation() {
-        let mut bnode = BNode::new(NodeType::LEAF, 10);
-        assert_eq!(bnode.b_type(), NodeType::LEAF);
+        let bnode = BNode::new(NodeType::Leaf, 10);
+        assert_eq!(bnode.b_type(), NodeType::Leaf);
         assert_eq!(bnode.num_keys(), 10);
     }
 
     #[test]
     fn test_bnode_get_set_ptr() {
-        let mut bnode = BNode::new(NodeType::NODE, 10);
+        let mut bnode = BNode::new(NodeType::Node, 10);
         for i in 0..10 {
             bnode.set_ptr(i, i as u64);
         }
@@ -425,40 +418,40 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: idx < self.num_keys()")]
     fn test_bnode_get_ptr_out_of_bounds() {
-        let mut bnode = BNode::new(NodeType::NODE, 10);
+        let bnode = BNode::new(NodeType::Node, 10);
         bnode.get_ptr(10); // This should panic
     }
 
     #[test]
     #[should_panic(expected = "assertion failed: idx < self.num_keys()")]
     fn test_bnode_set_ptr_out_of_bounds() {
-        let mut bnode = BNode::new(NodeType::NODE, 10);
+        let mut bnode = BNode::new(NodeType::Node, 10);
         bnode.set_ptr(10, 10); // This should panic
     }
 
     #[test]
     fn test_bnode_get_set_offset() {
-        let mut bnode = BNode::new(NodeType::NODE, 10);
+        let mut bnode = BNode::new(NodeType::Node, 10);
         for i in 1..10 {
-            bnode.set_offset(i, i as u16);
+            bnode.set_offset(i, i);
         }
         assert_eq!(bnode.get_offset(0), 0);
         for i in 1..10 {
-            assert_eq!(bnode.get_offset(i), i as u16);
+            assert_eq!(bnode.get_offset(i), i);
         }
     }
 
     #[test]
     fn test_bnode_offset_pos() {
-        let mut bnode = BNode::new(NodeType::NODE, 10);
+        let bnode = BNode::new(NodeType::Node, 10);
         for i in 1..=10 {
-            assert_eq!(bnode.offset_pos(i), (HEADER as u16) + 8 * 10 + 2 * (i - 1));
+            assert_eq!(bnode.offset_pos(i), HEADER + 8 * 10 + 2 * (i - 1));
         }
     }
 
     #[test]
     fn test_bnode_kv_pos() {
-        let mut bnode = BNode::new(NodeType::NODE, 3);
+        let mut bnode = BNode::new(NodeType::Node, 3);
 
         // Assuming variable-sized keys and values
         let key_size = 4; // Adjust this based on your actual key size
@@ -475,7 +468,7 @@ mod tests {
 
     #[test]
     fn test_bnode_get_key() {
-        let mut bnode = BNode::new(NodeType::NODE, 3);
+        let mut bnode = BNode::new(NodeType::Node, 3);
 
         // Assuming the keys are 4 bytes each
         for i in 0..3 {
@@ -491,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_bnode_get_val() {
-        let mut bnode = BNode::new(NodeType::NODE, 3);
+        let mut bnode = BNode::new(NodeType::Node, 3);
 
         // Assuming the values are 6 bytes each
         for i in 0..3 {
@@ -503,15 +496,15 @@ mod tests {
 
     #[test]
     fn test_bnode_nbytes() {
-        let mut bnode = BNode::new(NodeType::NODE, 5);
+        let bnode = BNode::new(NodeType::Node, 5);
 
         // Assuming the keys and values are 4 bytes each
-        assert_eq!(bnode.num_bytes(), HEADER as u16 + 8 * 5 + 2 * 5 + 0);
+        assert_eq!(bnode.num_bytes(), HEADER + 10 * 5);
     }
 
     #[test]
     fn test_bnode_node_lookup_le() {
-        let mut bnode = BNode::new(NodeType::NODE, 5);
+        let mut bnode = BNode::new(NodeType::Node, 5);
 
         // Assuming the keys are [0, 1, 2, 3, 4]
         for i in 0..5 {
@@ -528,7 +521,7 @@ mod tests {
     #[test]
     fn test_bnode_leaf_insert() {
         // Assuming the keys and values are 4 bytes each
-        let mut old_bnode = BNode::new(NodeType::NODE, 3);
+        let mut old_bnode = BNode::new(NodeType::Node, 3);
         for i in 0..3 {
             let key = vec![i as u8; 4];
             let val = vec![i as u8; 4];
@@ -537,7 +530,7 @@ mod tests {
 
         let new_key = vec![4u8; 4];
         let new_val = vec![4u8; 4];
-        let mut bnode = old_bnode.leaf_insert(1, &new_key, &new_val);
+        let bnode = old_bnode.leaf_insert(1, &new_key, &new_val);
 
         assert_eq!(bnode.num_keys(), 4);
         assert_eq!(bnode.get_key(0), vec![0u8; 4]);

@@ -1,7 +1,7 @@
 extern crate libc;
 extern crate memmap2; // Use the memmap2 crate for memory-mapped file support // Use the libc crate for the mmap flags
 
-use crate::b_tree::b_node::{BNode, Node, BTREE_PAGE_SIZE};
+use crate::b_tree::b_node::{Node, BTREE_PAGE_SIZE};
 use memmap2::{MmapMut, MmapOptions};
 use std::fs::File;
 use std::io::{self, Error, ErrorKind};
@@ -28,7 +28,7 @@ impl MMap {
         }
 
         let mut mmap_size: usize = 64 << 20; // 64 MiB
-        assert!(mmap_size % BTREE_PAGE_SIZE as usize == 0);
+        assert!(mmap_size % BTREE_PAGE_SIZE == 0);
 
         while mmap_size < file_size as usize {
             mmap_size *= 2;
