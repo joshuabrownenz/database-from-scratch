@@ -142,7 +142,7 @@ impl BTree {
                     // this happens when its parent has only one kid.
                     // discard the empty kid and return the parent as an empty node.
                     assert!(node_with_key.num_keys() == 0 && idx == 0);
-                    BNode::new(NodeType::Node, 0) 
+                    BNode::new(NodeType::Node, 0)
                     // the empty node will be eliminated before reaching root.
                 } else {
                     self.node_replace_kid_n(
@@ -323,18 +323,18 @@ mod tests {
     use rand::Rng;
 
     struct PageManager {
-        pub pages: HashMap<u64, BNode>,
+        pub pages: HashMap<u64, [u8; BTREE_PAGE_SIZE]>,
     }
 
     impl PageManager {
         fn new() -> PageManager {
             PageManager {
-                pages: HashMap::<u64, BNode>::new(),
+                pages: HashMap::<u64, [u8; BTREE_PAGE_SIZE]>::new(),
             }
         }
 
         fn get_page(&self, ptr: u64) -> BNode {
-            self.pages.get(&ptr).unwrap().clone()
+            BNode::from(self.pages.get(&ptr).unwrap())
         }
 
         fn new_page(&mut self, node: BNode) -> u64 {
@@ -344,7 +344,7 @@ mod tests {
             while self.pages.contains_key(&random_ptr) {
                 random_ptr = rng.gen();
             }
-            self.pages.insert(random_ptr, node);
+            self.pages.insert(random_ptr, node.get_data());
             random_ptr
         }
 
@@ -392,6 +392,11 @@ mod tests {
             self.reference.insert(key.to_string(), val.to_string());
         }
 
+        fn get(&self, key: &str) -> Option<Vec<u8>> {
+            self.tree
+                .get_value(&self.page_manager, &key.as_bytes().to_vec())
+        }
+
         fn delete(&mut self, key: &str) -> bool {
             let remove = self.reference.remove(key);
             let did_remove = self
@@ -402,6 +407,10 @@ mod tests {
         }
 
         fn node_dump(&mut self, ptr: u64, keys: &mut Vec<String>, vals: &mut Vec<String>) {
+            if ptr == 0 {
+                panic!("ptr can't be 0");
+            }
+
             let node = self.page_manager.get_page(ptr);
             let n_keys = node.num_keys();
             match node.b_type() {
@@ -452,6 +461,11 @@ mod tests {
         }
 
         fn verify(&mut self) {
+            if self.tree.root == 0 {
+                assert_eq!(self.reference.len(), 0);
+                return;
+            }
+
             let (keys, vals) = self.dump();
             let unique_keys: HashSet<_> = keys.iter().cloned().collect();
             assert_eq!(
@@ -481,6 +495,15 @@ mod tests {
         h = h.wrapping_mul(0xc2b2ae35);
         h ^= h >> 16;
         h
+    }
+
+    #[test]
+    fn test_perform_opperations_on_empty_kv() {
+        let mut c = C::new();
+        assert!(c.get("k").is_none());
+        c.verify();
+        assert!(!c.delete("k"));
+        c.verify();
     }
 
     #[test]

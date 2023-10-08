@@ -19,13 +19,8 @@ impl Node for FLNode {
     fn from(slice: &[u8]) -> Self {
         FLNode::from(slice)
     }
-
-    fn get_data(self) -> [u8; BTREE_PAGE_SIZE] {
-        self.get_data()
-    }
 }
 
-#[derive(Clone)]
 pub struct FLNode {
     data: [u8; BTREE_PAGE_SIZE],
 }

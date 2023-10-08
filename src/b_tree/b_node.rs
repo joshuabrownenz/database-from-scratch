@@ -33,20 +33,15 @@ impl NodeType {
 
 pub trait Node {
     fn from(slice: &[u8]) -> Self;
-    fn get_data(self) -> [u8; BTREE_PAGE_SIZE];
+    // fn get_data(self) -> [u8; BTREE_PAGE_SIZE];
 }
 
 impl Node for BNode {
     fn from(slice: &[u8]) -> Self {
         BNode::from(slice)
     }
-
-    fn get_data(self) -> [u8; BTREE_PAGE_SIZE] {
-        self.get_data()
-    }
 }
 
-#[derive(Clone)]
 pub struct BNode {
     data: [u8; 2 * BTREE_PAGE_SIZE],
     actual_size: usize,
@@ -391,6 +386,14 @@ impl BNode {
 mod tests {
     use super::*;
 
+    impl Clone for BNode {
+        fn clone(&self) -> Self {
+            let mut data = [0; 2* BTREE_PAGE_SIZE];
+            data[..BTREE_PAGE_SIZE].copy_from_slice(&self.data[..BTREE_PAGE_SIZE]);
+            BNode { data, actual_size : BTREE_PAGE_SIZE }
+        }
+    }
+
     #[test]
     fn test_size_of_node() {
         const MAX_SIZE: u32 =
@@ -421,6 +424,14 @@ mod tests {
     fn test_bnode_get_ptr_out_of_bounds() {
         let bnode = BNode::new(NodeType::Node, 10);
         bnode.get_ptr(10); // This should panic
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid BNode type 20")]
+    fn test_bnode_invalid_type() {
+        let mut bnode = BNode::new(NodeType::Node, 10);
+        bnode.data[0] = 20; // This should panic
+        BNode::from(&bnode.get_data());
     }
 
     #[test]
