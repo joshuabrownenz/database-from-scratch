@@ -10,4 +10,4 @@ Install Tarpaulin
 ```cargo install tarpaulin```
 
 Run tests with coverage
-```cargo tarpaulin --out lcov```
+```cargo tarpaulin --out lcov``` 
