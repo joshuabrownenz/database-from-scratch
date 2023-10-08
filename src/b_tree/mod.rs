@@ -137,14 +137,22 @@ impl BTree {
                 )
             }
             MergeDirection::None => {
-                assert!(updated_node.num_keys() > 0);
-                self.node_replace_kid_n(
-                    page_manager,
-                    BTREE_PAGE_SIZE,
-                    node_with_key,
-                    idx,
-                    vec![updated_node],
-                )
+                if updated_node.num_keys() == 0 {
+                    // kid is empty after deletion and has no sibling to merge with.
+                    // this happens when its parent has only one kid.
+                    // discard the empty kid and return the parent as an empty node.
+                    assert!(node_with_key.num_keys() == 0 && idx == 0);
+                    BNode::new(NodeType::Node, 0) 
+                    // the empty node will be eliminated before reaching root.
+                } else {
+                    self.node_replace_kid_n(
+                        page_manager,
+                        BTREE_PAGE_SIZE,
+                        node_with_key,
+                        idx,
+                        vec![updated_node],
+                    )
+                }
             }
         })
     }

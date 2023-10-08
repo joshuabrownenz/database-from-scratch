@@ -85,6 +85,7 @@ impl BNode {
     }
 
     pub fn get_data(self) -> [u8; BTREE_PAGE_SIZE] {
+        assert!(self.actual_size == BTREE_PAGE_SIZE);
         self.data[..BTREE_PAGE_SIZE].try_into().unwrap()
     }
 
@@ -141,7 +142,7 @@ impl BNode {
 
     // key-values
     pub fn kv_pos(&self, idx: u16) -> u16 {
-        let num_keys = self.num_keys();
+        let num_keys: u16 = self.num_keys();
         assert!(idx <= num_keys);
         HEADER + 10 * num_keys + self.get_offset(idx)
     }
