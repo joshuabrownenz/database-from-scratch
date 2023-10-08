@@ -280,12 +280,12 @@ impl BTree {
         &self,
         page_manager: &P,
         key: &Vec<u8>,
-    ) -> Result<Vec<u8>, ()> {
+    ) -> Option<Vec<u8>> {
         assert!(!key.is_empty());
         assert!(key.len() <= BTREE_MAX_KEY_SIZE);
 
         if self.root == 0 {
-            return Err(());
+            return None;
         };
 
         let mut node = page_manager.page_get(self.root);
@@ -293,8 +293,8 @@ impl BTree {
             let idx = node.node_lookup_le(key);
             match node.b_type() {
                 NodeType::Leaf => match node.get_key(idx).cmp(key) {
-                    Ordering::Equal => return Ok(node.get_val(idx)),
-                    _ => return Err(()),
+                    Ordering::Equal => return Some(node.get_val(idx)),
+                    _ => return None,
                 },
                 NodeType::Node => {
                     let ptr = node.get_ptr(idx);

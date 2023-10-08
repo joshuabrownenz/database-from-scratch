@@ -1,7 +1,7 @@
 pub mod fl_node;
-pub mod page_manager;
-pub mod page;
+mod master_page;
 pub mod mmap;
+pub mod page_manager;
 
 use crate::{
     b_tree::{b_node::BNode, BTreePageManager},
@@ -10,19 +10,36 @@ use crate::{
 
 use std::{collections::VecDeque, fs::File, io};
 
-use self::{fl_node::FLNode, page_manager::PageManager};
+use self::{fl_node::FLNode, master_page::MasterPage, page_manager::PageManager};
 pub struct FreeList {
-    pub head: u64,
-
-    pub page_manager: PageManager,
+    /// Pointer to first node of the free list
+    head: u64,
+    /// Number of pages taken from the free list
+    nfree: i64,
+    page_manager: PageManager,
 }
 
 impl FreeList {
-    pub fn new(fp: &File) -> io::Result<Self> {
+    pub fn new(file_pointer: File) -> io::Result<Self> {
         Ok(Self {
             head: 0,
-            page_manager: PageManager::new(fp)?,
+            nfree: 0,
+            page_manager: PageManager::new(file_pointer)?,
         })
+    }
+
+    pub fn master_load(&mut self) -> io::Result<MasterPage> {
+        let master_page = self.page_manager.master_load()?;
+        self.head = master_page.free_list_head;
+        Ok(master_page)
+    }
+
+    pub fn set_master_page(&mut self, btree_root: u64) -> io::Result<()> {
+        self.page_manager.set_master_page(btree_root, self.head)
+    }
+
+    pub fn close(self) {
+        self.page_manager.close();
     }
 
     pub fn total(&self) -> i64 {
@@ -30,7 +47,7 @@ impl FreeList {
             return 0;
         }
         self.page_manager
-            .page_get_flnode(self.head)
+            .page_get::<FLNode>(self.head)
             .total()
             .try_into()
             .unwrap()
@@ -39,12 +56,12 @@ impl FreeList {
     pub fn get(&self, mut topn: i64) -> u64 {
         assert!(0 <= topn && topn < self.total());
         assert!(self.head != 0);
-        let mut node: FLNode = self.page_manager.page_get_flnode(self.head);
+        let mut node: FLNode = self.page_manager.page_get(self.head);
         while node.size() as i64 <= topn {
             topn -= node.size() as i64;
             let next = node.next();
             assert!(next != 0);
-            node = self.page_manager.page_get_flnode(next);
+            node = self.page_manager.page_get(next);
         }
         node.get_ptr(node.size() - topn as u16 - 1)
     }
@@ -52,20 +69,44 @@ impl FreeList {
     pub fn page_new(&mut self, node: BNode) -> u64 {
         let ptr: u64;
         let total = self.total();
-        if self.page_manager.page.nfree < total {
+        if self.nfree < total {
             // reuse deallocated page
-            ptr = self.get(self.page_manager.page.nfree);
-            self.page_manager.page.nfree += 1;
+            ptr = self.get(self.nfree);
+            self.nfree += 1;
         } else {
             // allocate new page
-            ptr = self.page_manager.page.flushed + self.page_manager.page.nappend as u64;
-            self.page_manager.page.nappend += 1;
+            ptr = self.page_manager.flushed + self.page_manager.nappend as u64;
+            self.page_manager.nappend += 1;
         }
-        self.page_manager
-            .page
-            .updates
-            .insert(ptr, Some(node.get_data()));
+        self.page_manager.updates.insert(ptr, Some(node.get_data()));
         ptr
+    }
+
+    pub fn flush_pages(&mut self, btree_root: u64) -> io::Result<()> {
+        self.write_pages()?;
+        self.sync_pages(btree_root)?;
+        Ok(())
+    }
+
+    fn sync_pages(&mut self, btree_root: u64) -> io::Result<()> {
+        self.page_manager.flush()?;
+        self.nfree = 0;
+
+        // update and flush the master page
+        self.set_master_page(btree_root)?;
+        self.page_manager.flush()?;
+
+        Ok(())
+    }
+
+    fn write_pages(&mut self) -> io::Result<()> {
+        // update the free list
+        let freed_ptrs = self.page_manager.get_freed_ptrs();
+        self.update(self.nfree, freed_ptrs);
+
+        self.page_manager.write_pages()?;
+
+        Ok(())
     }
 
     pub fn update(&mut self, mut popn: i64, mut freed_ptrs: VecDeque<u64>) {
@@ -78,7 +119,7 @@ impl FreeList {
         let mut total = self.total();
         let mut reuse: VecDeque<u64> = VecDeque::new();
         while self.head != 0 && reuse.len() * MAX_FREE_LIST_IN_PAGE < freed_ptrs.len() {
-            let node: FLNode = self.page_manager.page_get_flnode(self.head);
+            let node: FLNode = self.page_manager.page_get(self.head);
             freed_ptrs.push_back(self.head); // recycle the head node
             if popn >= node.size() as i64 {
                 // phase 1 - remove all pointers in this node (popn is large enough we can just discard this node)
@@ -159,7 +200,30 @@ impl BTreePageManager for FreeList {
     }
 }
 
-// #[cfg(test)]
+#[cfg(test)]
+impl FreeList {
+    pub fn debug_free_list(&self) {
+        let mut head = self.head;
+        if head == 0 {
+            println!("free list is empty");
+            return;
+        }
+
+        while head != 0 {
+            let free_node: FLNode = self.page_manager.page_get(head);
+            println!("Page {}: {:?}", head, free_node);
+            head = free_node.next();
+        }
+    }
+
+    pub fn get_free_list_total(&self) -> u64 {
+        if self.head == 0 {
+            0
+        } else {
+            self.page_manager.page_get::<FLNode>(self.head).total()
+        }
+    }
+}
 // mod tests {
 //     use std::fs;
 
@@ -174,13 +238,13 @@ impl BTreePageManager for FreeList {
 //         if delete_old {
 //             fs::remove_file(&file_name);
 //         }
-//         let fp = fs::OpenOptions::new()
+//         let file_pointer = fs::OpenOptions::new()
 //             .read(true)
 //             .write(true)
 //             .create(true)
 //             .open(&file_name)
 //             .unwrap();
-//         FreeList::new(&fp).unwrap()
+//         FreeList::new(&file_pointer).unwrap()
 //     }
 
 //     #[test]
@@ -193,4 +257,3 @@ impl BTreePageManager for FreeList {
 //         }
 //     }
 // }
-

@@ -20,3 +20,4 @@ Cargo.lock
 
 # Custom ignore files
 test_run_dir/
+large_test_files/

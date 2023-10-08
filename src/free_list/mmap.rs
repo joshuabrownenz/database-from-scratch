@@ -16,8 +16,8 @@ pub struct MMap {
 }
 
 impl MMap {
-    pub fn new(fp: &File) -> io::Result<MMap> {
-        let metadata = fp.metadata()?;
+    pub fn new(file_pointer: &File) -> io::Result<MMap> {
+        let metadata = file_pointer.metadata()?;
         let file_size = metadata.len();
 
         if file_size % BTREE_PAGE_SIZE as u64 != 0 {
@@ -35,7 +35,7 @@ impl MMap {
         }
 
         // mmap_size can be larger than the file
-        let mmap = unsafe { MmapOptions::new().len(mmap_size).map_mut(fp)? };
+        let mmap = unsafe { MmapOptions::new().len(mmap_size).map_mut(file_pointer)? };
 
         Ok(MMap {
             file: file_size,
@@ -44,7 +44,7 @@ impl MMap {
         })
     }
 
-    pub fn extend_mmap(&mut self, fp: &File, npages: usize) -> io::Result<()> {
+    pub fn extend_mmap(&mut self, file_pointer: &File, npages: usize) -> io::Result<()> {
         if self.total >= npages * BTREE_PAGE_SIZE {
             return Ok(());
         }
@@ -53,7 +53,7 @@ impl MMap {
             memmap2::MmapOptions::new()
                 .offset(self.total as u64)
                 .len(self.total)
-                .map_mut(fp)
+                .map_mut(file_pointer)
         }
         .map_err(|e| Error::new(ErrorKind::Other, format!("mmap: {}", e)))?;
 
@@ -93,5 +93,9 @@ impl MMap {
         let (chunk_index, offset) = self.get_offset_of_ptr(ptr);
         let chunk = &mut self.chunks[chunk_index];
         chunk[offset as usize..offset as usize + BTREE_PAGE_SIZE].copy_from_slice(value);
+    }
+
+    pub fn close(mut self) {
+        self.chunks.clear();
     }
 }

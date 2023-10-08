@@ -16,5 +16,5 @@ fn test_kv_store_integration() {
     kv.set(&"key2".as_bytes().to_vec(), &"value2".as_bytes().to_vec())
         .unwrap();
     kv.del(&"key2".as_bytes().to_vec()).unwrap();
-    assert!(kv.get(&"key2".as_bytes().to_vec()).is_err());
+    assert!(kv.get(&"key2".as_bytes().to_vec()).is_none());
 }
