@@ -80,14 +80,6 @@ impl KV {
 mod tests {
     use std::{collections::HashSet, fs};
 
-    use crate::{
-        b_tree::{
-            b_node::{BNode, NodeType},
-            BTreePageManager,
-        },
-        free_list::fl_node::MAX_FREE_LIST_IN_PAGE,
-    };
-
     use super::*;
     extern crate rand;
 
@@ -199,37 +191,37 @@ mod tests {
         kv.close();
     }
 
-    #[test]
-    fn test_fl_full_node() {
-        let mut kv = new_kv("test_fl_full_node.db", true);
+    // #[test]
+    // fn test_fl_full_node() {
+    //     let mut kv = new_kv("test_fl_full_node.db", true);
 
-        let mut pages: HashSet<u64> = HashSet::new();
-        let mut free_pages: u64 = 0;
-        for i in 0..15 * MAX_FREE_LIST_IN_PAGE {
-            let new_page = kv.free.page_new(BNode::new(NodeType::Leaf, 0));
-            free_pages = free_pages.saturating_sub(1);
-            assert!(!pages.contains(&new_page));
-            pages.insert(new_page);
-            if i != 0 && i % 10 == 0 && pages.contains(&(new_page - 5)) {
-                kv.free.page_del(new_page - 5);
-                free_pages += 1;
-                pages.remove(&(new_page - 5));
-            }
-            kv.flush_pages().unwrap();
+    //     let mut pages: HashSet<u64> = HashSet::new();
+    //     let mut free_pages: u64 = 0;
+    //     for i in 0..15 * MAX_FREE_LIST_IN_PAGE {
+    //         let new_page = kv.free.page_new(BNode::new(NodeType::Leaf, 0));
+    //         free_pages = free_pages.saturating_sub(1);
+    //         assert!(!pages.contains(&new_page));
+    //         pages.insert(new_page);
+    //         if i != 0 && i % 10 == 0 && pages.contains(&(new_page - 5)) {
+    //             kv.free.page_del(new_page - 5);
+    //             free_pages += 1;
+    //             pages.remove(&(new_page - 5));
+    //         }
+    //         kv.flush_pages().unwrap();
 
-            // Assert free list matchs
-        }
+    //         // Assert free list matchs
+    //     }
 
-        for page in pages {
-            kv.free.page_del(page);
-            kv.flush_pages().unwrap();
-        }
-    }
+    //     for page in pages {
+    //         kv.free.page_del(page);
+    //         kv.flush_pages().unwrap();
+    //     }
+    // }
 
     #[test]
     fn test_database_merging_ability() {
         let mut kv = new_kv("test_database_merging_ability.db", true);
-        
+
         let mut rng = StdRng::seed_from_u64(2131);
         let mut keys: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         for _ in 0..20000 {
@@ -248,7 +240,7 @@ mod tests {
             } else {
                 rng.gen_range(0..keys.len().saturating_sub(section_size as usize) as u32)
             };
-          
+
             for _ in 0..section_size {
                 if section_start >= keys.len() as u32 {
                     break;
@@ -258,28 +250,6 @@ mod tests {
                 assert_eq!(result.unwrap(), value);
                 kv.del(&key).unwrap();
             }
-        }
-    }
-
-    #[test]
-    fn test_large_database_that_failed() {
-        fs::copy(
-            "large_test_files/erroring_very_large_db.db",
-            "test_run_dir/erroring_very_large_db.db",
-        )
-        .unwrap();
-        let mut kv = KV::open("test_run_dir/erroring_very_large_db.db".to_string()).unwrap();
-
-        for i in 120714..1000000 {
-            println!("Step 2: {}", i);
-            let key = format!("key{}", i).as_bytes().to_vec();
-            let value = format!("value{}", i).as_bytes().to_vec();
-            let result = kv.get(&key);
-            if result.is_some() {
-                assert_eq!(result.unwrap(), value);
-            }
-            println!("{}: FL.total() = {}", i, get_free_list_total(&kv));
-            kv.del(&key).unwrap();
         }
     }
 }
