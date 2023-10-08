@@ -1,5 +1,5 @@
 [package]
-name = "database-from-scratch"
+name = "database_from_scratch"
 version = "0.1.0"
 edition = "2021"
 

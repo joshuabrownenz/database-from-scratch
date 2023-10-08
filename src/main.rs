@@ -1,8 +1,4 @@
-mod b_tree;
-mod free_list;
-mod kv_store;
-
-use kv_store::KV;
+use database_from_scratch::kv_store::KV;
 
 fn main() {
     let kv = KV::open("main.db".to_string());
