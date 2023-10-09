@@ -388,9 +388,12 @@ mod tests {
 
     impl Clone for BNode {
         fn clone(&self) -> Self {
-            let mut data = [0; 2* BTREE_PAGE_SIZE];
+            let mut data = [0; 2 * BTREE_PAGE_SIZE];
             data[..BTREE_PAGE_SIZE].copy_from_slice(&self.data[..BTREE_PAGE_SIZE]);
-            BNode { data, actual_size : BTREE_PAGE_SIZE }
+            BNode {
+                data,
+                actual_size: BTREE_PAGE_SIZE,
+            }
         }
     }
 

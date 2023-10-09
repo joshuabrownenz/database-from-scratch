@@ -141,7 +141,7 @@ impl BTree {
                     // kid is empty after deletion and has no sibling to merge with.
                     // this happens when its parent has only one kid.
                     // discard the empty kid and return the parent as an empty node.
-                    assert!(node_with_key.num_keys() == 0 && idx == 0);
+                    assert!(node_with_key.num_keys() == 1 && idx == 0);
                     BNode::new(NodeType::Node, 0)
                     // the empty node will be eliminated before reaching root.
                 } else {
@@ -320,7 +320,7 @@ mod tests {
     use super::*;
     extern crate rand;
 
-    use rand::Rng;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
 
     struct PageManager {
         pub pages: HashMap<u64, [u8; BTREE_PAGE_SIZE]>,
@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn test_random_key_and_val_lengths() {
         let mut c = C::new();
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::seed_from_u64(0);
         for i in 0..2000 {
             let klen = fmix32(2 * i) % BTREE_MAX_KEY_SIZE as u32;
             let vlen = fmix32(2 * i + 1) % BTREE_MAX_VAL_SIZE as u32;
@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn test_fit_of_different_key_lengths() {
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::seed_from_u64(0);
         for l in (1..BTREE_MAX_KEY_SIZE + BTREE_MAX_VAL_SIZE).step_by(20) {
             let mut c = C::new();
 
@@ -621,6 +621,7 @@ mod tests {
                 size = 10;
             }
 
+            let mut kv_pairs: HashMap<String, String> = HashMap::new();
             for _ in 0..size {
                 let key: String = (0..klen)
                     .map(|_| (rng.gen_range(32..127)) as u8 as char)
@@ -631,6 +632,18 @@ mod tests {
                     .collect();
 
                 c.add(&key, &val);
+                kv_pairs.insert(key, val);
+            }
+            c.verify();
+
+            let mut keys = kv_pairs.keys().cloned().collect::<Vec<String>>();
+            let keys_len: usize = keys.len();
+            for _ in 0..keys_len {
+                let idx = rng.gen_range(0..keys.len());
+                let key = keys.remove(idx);
+                let value = kv_pairs.remove(&key).unwrap();
+                assert_eq!(c.get(&key), Some(value.as_bytes().to_vec()));
+                assert!(c.delete(&key));
             }
             c.verify();
         }
