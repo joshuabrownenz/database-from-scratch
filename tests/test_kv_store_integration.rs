@@ -1,8 +1,11 @@
+use std::fs;
+
 use database_from_scratch::kv_store::KV;
 
 #[test]
 fn test_kv_store_integration() {
-    let mut kv = KV::open("test.db".to_string()).unwrap();
+    fs::create_dir_all("test_run_dir").unwrap();
+    let mut kv = KV::open("test_run_dir/test.db".to_string()).unwrap();
 
     // Test `set` and `get`
     kv.set(&"key1".as_bytes().to_vec(), &"value1".as_bytes().to_vec())
