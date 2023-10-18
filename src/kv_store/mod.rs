@@ -48,7 +48,7 @@ impl KV {
         self.free.close();
     }
 
-    pub fn get(&mut self, key: &Vec<u8>) -> Option<Vec<u8>> {
+    pub fn get(&self, key: &Vec<u8>) -> Option<Vec<u8>> {
         self.tree.get_value(&self.free, key)
     }
 

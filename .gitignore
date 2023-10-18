@@ -24,3 +24,4 @@ large_test_files/
 
 # Ignore coverage files
 lcov*
+*.pdf

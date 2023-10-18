@@ -1,39 +1,41 @@
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ValueType {
-    Error = 0,
-    Bytes = 1,
-    Int64 = 2,
-}
+use super::value::Value;
 
-impl ValueType {
-    pub fn value(&self) -> u32 {
-        *self as u32
-    }
-}
-
-// Table Cell
-pub struct Value {
-    value_type : u32,
-    i64: i64,
-    str : Vec<u8>,
-}
-
-// Tbale row
+// Table row
 pub struct Record {
-    columns : Vec<String>,
-    values : Vec<Value>,
+    pub columns: Vec<String>,
+    pub values: Vec<Value>,
 }
 
 impl Record {
-    pub fn addStr(&mut self, key : String, value :  Vec<u8>) {
-
+    pub fn new() -> Record {
+        Record {
+            columns: vec![],
+            values: vec![],
+        }
     }
 
-    pub fn addInt64(&mut self, key : String, value : i64) {
-
+    pub fn add_bytes(&mut self, key: String, value: Vec<u8>) {
+        assert!(!self.columns.contains(&key));
+        self.columns.push(key);
+        self.values.push(Value::Bytes(value));
     }
 
-    pub fn get(&self, key : String) -> Value {
-        let index = self.columns.iter().position(|x| *x == key).unwrap();
+    pub fn add_int64(&mut self, key: String, value: i64) {
+        assert!(!self.columns.contains(&key));
+        self.columns.push(key);
+        self.values.push(Value::Int64(value));
+    }
+
+    pub fn get(&self, key: &String) -> Option<&Value> {
+        match self.columns.iter().position(|x| x == key) {
+            Some(index) => Some(&self.values[index]),
+            None => None,
+        }
+    }
+}
+
+impl Default for Record {
+    fn default() -> Self {
+        Self::new()
     }
 }
