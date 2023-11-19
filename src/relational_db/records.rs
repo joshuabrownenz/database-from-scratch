@@ -17,13 +17,13 @@ impl Record {
     pub fn add_bytes(&mut self, key: String, value: Vec<u8>) {
         assert!(!self.columns.contains(&key));
         self.columns.push(key);
-        self.values.push(Value::Bytes(value));
+        self.values.push(Value::Bytes(Some(value)));
     }
 
     pub fn add_int64(&mut self, key: String, value: i64) {
         assert!(!self.columns.contains(&key));
         self.columns.push(key);
-        self.values.push(Value::Int64(value));
+        self.values.push(Value::Int64(Some(value)));
     }
 
     pub fn get(&self, key: &String) -> Option<&Value> {

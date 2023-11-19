@@ -44,7 +44,7 @@ impl DB {
 
     /// Retrieve value from kv store itself
     fn db_get(&self, table_def: &TableDef, record: &mut Record) -> Result<bool, String> {
-        let mut values: Vec<Value> = table_def.check_record(record)?;
+        let mut values: Vec<Value> = table_def.check_record(record, table_def.primary_keys)?;
 
         let key: Vec<u8> = DB::encode_key(
             None,
@@ -57,10 +57,9 @@ impl DB {
         }
         let value_raw = value_raw.unwrap();
 
-        // Replaced with logic in check record
-        // for i in table_def.primary_keys..table_def.columns.len() {
-        //     values[i].t
-        // }
+        for i in table_def.primary_keys as usize..table_def.columns.len() {
+            values[i] = Value::u32_to_empty_value(table_def.types[i]);
+        }
         DB::decode_values(&value_raw, &mut values[table_def.primary_keys as usize..]);
         record.columns.extend(
             table_def.columns[table_def.primary_keys as usize..]
@@ -90,20 +89,20 @@ impl DB {
                     let mut buf: [u8; 8] = [0; 8];
                     buf.copy_from_slice(&in_bytes[pos..8]);
                     let i64 = LittleEndian::read_i64(&buf);
-                    values_out[i] = Value::Int64(i64);
+                    values_out[i] = Value::Int64(Some(i64));
                     pos += 8;
                 }
                 Value::Bytes(_) => {
                     let idx = in_bytes[pos..].iter().position(|&x| x == 0).unwrap();
                     let bytes = Value::unescape_string(&in_bytes[pos..pos + idx].to_vec());
-                    values_out[i] = Value::Bytes(bytes);
+                    values_out[i] = Value::Bytes(Some(bytes));
                     pos += idx + 1;
                 }
                 Value::Error => {
                     panic!("Error decoding value")
                 }
             }
-        } 
+        }
         assert!(pos == in_bytes.len());
     }
 
@@ -112,11 +111,11 @@ impl DB {
             match value {
                 Value::Int64(i) => {
                     let mut buf: [u8; 8] = [0; 8];
-                    LittleEndian::write_i64(&mut buf, *i);
+                    LittleEndian::write_i64(&mut buf, i.unwrap());
                     out.extend(buf);
                 }
                 Value::Bytes(b) => {
-                    out.extend(Value::escape_string(b));
+                    out.extend(Value::escape_string(b.as_ref().unwrap()));
                     out.extend(0..=0); // null-terminated
                 }
                 Value::Error => {

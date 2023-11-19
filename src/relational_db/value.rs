@@ -1,9 +1,11 @@
+use std::fmt;
+
 // Table Cell
 #[derive(Clone)]
 pub enum Value {
     Error,
-    Bytes(Vec<u8>),
-    Int64(i64),
+    Bytes(Option<Vec<u8>>),
+    Int64(Option<i64>),
 }
 
 impl Value {
@@ -19,10 +21,21 @@ impl Value {
         }
     }
 
-    pub fn bytes_to_string(&self) -> Result<String, ()> {
+    pub fn u32_to_empty_value(u: u32) -> Value {
+        match u {
+            Value::ERROR_TYPE => Value::Error,
+            Value::BYTES_TYPE => Value::Bytes(None),
+            Value::INT64_TYPE => Value::Int64(None),
+            _ => panic!("Invalid type"),
+        }
+    }
+
+    pub fn bytes_to_string(&self) -> Result<String, ValueParseError> {
         match self {
-            Value::Bytes(bytes) => Ok(String::from(String::from_utf8_lossy(bytes))),
-            _ => Err(()),
+            Value::Bytes(bytes) => Ok(String::from(String::from_utf8_lossy(
+                bytes.as_ref().unwrap(),
+            ))),
+            _ => Err(ValueParseError),
         }
     }
 
@@ -59,7 +72,7 @@ impl Value {
         let mut out = Vec::with_capacity(in_bytes.len());
         let mut pos = 0;
         let mut i = 0;
-        while pos  < in_bytes.len() {
+        while pos < in_bytes.len() {
             if in_bytes[i] == 0x01 {
                 i += 1;
                 assert!(in_bytes[i] >= 1);
@@ -74,3 +87,14 @@ impl Value {
         out[0..pos].to_vec()
     }
 }
+
+#[derive(Debug)]
+pub struct ValueParseError;
+
+impl fmt::Display for ValueParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Value Parse Error")
+    }
+}
+
+impl std::error::Error for ValueParseError {}
