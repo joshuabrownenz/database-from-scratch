@@ -5,7 +5,7 @@ use std::{
 
 extern crate byteorder;
 
-use crate::{b_tree::BTree, free_list::FreeList};
+use crate::{b_tree::BTree, free_list::FreeList, relational_db::requests::InsertMode};
 
 pub struct KV {
     tree: BTree,
@@ -73,6 +73,10 @@ impl KV {
     fn flush_pages(&mut self) -> io::Result<()> {
         self.free.flush_pages(self.tree.root)?;
         Ok(())
+    }
+
+    pub fn update(&mut self, key: &Vec<u8>, value: &Vec<u8>, mode: InsertMode) -> Result<bool, String> {
+        panic!("Not implemented")
     }
 }
 

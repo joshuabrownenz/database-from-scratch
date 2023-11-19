@@ -5,6 +5,8 @@ use self::b_node::{
     BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER,
 };
 
+use crate::relational_db::requests::InsertRequest;
+
 enum MergeDirection {
     Left(BNode),
     Right(BNode),
@@ -310,6 +312,10 @@ impl BTree {
                 }
             }
         }
+    }
+
+    pub fn insert_exec(&mut self, request: InsertRequest) {
+        panic!("Not implemented")
     }
 }
 

@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use crate::kv_store::KV;
 
 pub mod records;
+pub mod requests;
 pub mod tables;
 pub mod value;
+
 use byteorder::{ByteOrder, LittleEndian};
 use records::Record;
 
-use self::{tables::TableDef, value::Value};
+use self::{requests::InsertMode, tables::TableDef, value::Value};
 
 lazy_static! {
     pub static ref TABLE_DEF_META: TableDef = TableDef {
@@ -46,38 +48,90 @@ impl DB {
     fn db_get(&self, table_def: &TableDef, record: &mut Record) -> Result<bool, String> {
         let mut values: Vec<Value> = table_def.check_record(record, table_def.primary_keys)?;
 
-        let key: Vec<u8> = DB::encode_key(
-            None,
-            table_def.prefix,
-            &values[..table_def.primary_keys as usize],
-        );
+        let key: Vec<u8> =
+            DB::encode_key(None, table_def.prefix, &values[..table_def.primary_keys]);
         let value_raw = self.kv.get(&key);
         if value_raw.is_none() {
             return Ok(false);
         }
         let value_raw = value_raw.unwrap();
 
-        for i in table_def.primary_keys as usize..table_def.columns.len() {
+        for i in table_def.primary_keys..table_def.columns.len() {
             values[i] = Value::u32_to_empty_value(table_def.types[i]);
         }
-        DB::decode_values(&value_raw, &mut values[table_def.primary_keys as usize..]);
-        record.columns.extend(
-            table_def.columns[table_def.primary_keys as usize..]
-                .iter()
-                .cloned(),
-        );
+        DB::decode_values(&value_raw, &mut values[table_def.primary_keys..]);
+        record
+            .columns
+            .extend(table_def.columns[table_def.primary_keys..].iter().cloned());
         record
             .values
-            .extend(values[table_def.primary_keys as usize..].iter().cloned());
+            .extend(values[table_def.primary_keys..].iter().cloned());
         Ok(true)
     }
 
+    pub fn db_update(
+        &mut self,
+        table_def: &TableDef,
+        record: &Record,
+        mode: InsertMode,
+    ) -> Result<bool, String> {
+        let mut values: Vec<Value> = table_def.check_record(record, table_def.columns.len())?;
+
+        let key = DB::encode_key(
+            None,
+            table_def.prefix,
+            values[..table_def.primary_keys].as_ref(),
+        );
+
+        let value = DB::encode_values(None, values[table_def.primary_keys..].as_ref());
+
+        self.kv.update(&key, &value, mode)
+    }
+
+    fn set(&mut self, table: String, record: Record, mode: InsertMode) -> Result<bool, String> {
+        match self.get_table_def(&table) {
+            Some(table_def) => self.db_update(&table_def, &record, mode),
+            None => Err(format!("Table not found {}", table)),
+        }
+    }
+
+    pub fn insert(&mut self, table: String, record: Record) -> Result<bool, String> {
+        self.set(table, record, InsertMode::MODE_INSERT_ONLY)
+    }
+
+    pub fn update(&mut self, table: String, record: Record) -> Result<bool, String> {
+        self.set(table, record, InsertMode::MODE_UPDATE_ONLY)
+    }
+
+    pub fn upsert(&mut self, table: String, record: Record) -> Result<bool, String> {
+        self.set(table, record, InsertMode::MODE_UPSERT)
+    }
+
+    fn db_delete(&mut self, table_def: &TableDef, record: Record) -> Result<bool, String> {
+        let mut values: Vec<Value> = table_def.check_record(&record, table_def.primary_keys)?;
+
+        let key = DB::encode_key(
+            None,
+            table_def.prefix,
+            values[..table_def.primary_keys].as_ref(),
+        );
+
+        self.kv.del(&key).map_err(|err| err.to_string())
+    }
+
+    pub fn delete(&mut self, table: String, record: Record) -> Result<bool, String> {
+        match self.get_table_def(&table) {
+            Some(table_def) => self.db_delete(&table_def, record),
+            None => Err(format!("Table not found {}", table)),
+        }
+    }
+
     pub fn encode_key(out: Option<Vec<u8>>, prefix: u32, values: &[Value]) -> Vec<u8> {
-        let mut out = out.unwrap_or(vec![]);
+        let mut out = out.unwrap_or_default();
         let mut buf: [u8; 4] = [0; 4];
         LittleEndian::write_u32(&mut buf, prefix);
         out.extend(buf);
-        let out = DB::encode_values(out, values);
+        let out = DB::encode_values(Some(out), values);
         out
     }
 
@@ -106,7 +160,8 @@ impl DB {
         assert!(pos == in_bytes.len());
     }
 
-    fn encode_values(mut out: Vec<u8>, values: &[Value]) -> Vec<u8> {
+    fn encode_values(mut out: Option<Vec<u8>>, values: &[Value]) -> Vec<u8> {
+        let mut out = out.unwrap_or_default();
         for value in values {
             match value {
                 Value::Int64(i) => {
