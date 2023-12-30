@@ -1,17 +1,33 @@
 use crate::b_tree::BTree;
 
+#[derive(PartialEq)]
 pub enum InsertMode {
-    MODE_UPSERT,      // insert or replace
-    MODE_UPDATE_ONLY, // update existing keys
-    MODE_INSERT_ONLY, // only add new keys
+    ModeUpsert,     // insert or replace
+    ModeUpdateOnly, // update existing keys
+    ModeInsertOnly, // only add new keys
 }
 
-pub struct InsertRequest<'a> {
-    tree: &'a mut BTree,
+pub struct InsertRequest {
+    // tree: &'a mut BTree, // Not sure why we need this
     // out
-    added: bool, // added a new key
+    pub added: bool, // added a new key
     // in
-    key: Vec<u8>,
-    val: Vec<u8>,
-    mode: InsertMode,
+    pub key: Vec<u8>,
+    pub val: Vec<u8>,
+    pub mode: InsertMode,
+}
+
+impl InsertRequest {
+    pub fn new(key: Vec<u8>, val: Vec<u8>) -> InsertRequest {
+        InsertRequest {
+            key,
+            val,
+            mode: InsertMode::ModeUpsert,
+            added: false,
+        }
+    }
+    pub fn mode(mut self, mode: InsertMode) -> InsertRequest {
+        self.mode = mode;
+        self
+    }
 }

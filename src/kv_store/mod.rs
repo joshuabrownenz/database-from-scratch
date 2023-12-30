@@ -5,7 +5,11 @@ use std::{
 
 extern crate byteorder;
 
-use crate::{b_tree::BTree, free_list::FreeList, relational_db::requests::InsertMode};
+use crate::{
+    b_tree::BTree,
+    free_list::FreeList,
+    relational_db::requests::{InsertMode, InsertRequest},
+};
 
 pub struct KV {
     tree: BTree,
@@ -53,7 +57,7 @@ impl KV {
     }
 
     pub fn set(&mut self, key: &Vec<u8>, value: &Vec<u8>) -> io::Result<()> {
-        self.tree.insert(&mut self.free, key, value);
+        self.tree.insert(&mut self.free, key.clone(), value.clone());
         self.flush_pages()
     }
 
@@ -75,8 +79,11 @@ impl KV {
         Ok(())
     }
 
-    pub fn update(&mut self, key: &Vec<u8>, value: &Vec<u8>, mode: InsertMode) -> Result<bool, String> {
-        panic!("Not implemented")
+    pub fn update(&mut self, key: Vec<u8>, value: Vec<u8>, mode: InsertMode) -> io::Result<bool> {
+        let mut req = InsertRequest::new(key, value).mode(mode);
+        let req = self.tree.insert_exec(&mut self.free, req);
+        self.flush_pages()?;
+        Ok(req.added)
     }
 }
 
