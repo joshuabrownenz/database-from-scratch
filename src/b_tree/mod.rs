@@ -106,10 +106,10 @@ impl BTree {
         // get and deallocate the kid node
         let kid_ptr = node_to_have_key.get_ptr(idx);
         let kid_node = page_manager.page_get(kid_ptr);
-        
+
         //recursive insertion to the kid node
         let kid_node = self.tree_insert(page_manager, kid_node, request)?;
-        
+
         page_manager.page_del(kid_ptr);
 
         //split the result
@@ -328,7 +328,8 @@ impl BTree {
         } else {
             self.root = page_manager.page_new(splitted.remove(0));
         };
-        return request;
+
+        request
     }
 
     pub fn get_value<P: BTreePageManager>(
@@ -694,5 +695,70 @@ mod tests {
             }
             c.verify();
         }
+    }
+
+    #[test]
+    fn insert_exec_mode_upsert() {
+        let mut c = C::new();
+        // Insert root
+        c.add("key", "val1");
+
+        // Test that upsert works
+        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::ModeUpsert);
+        let response = c.tree.insert_exec(&mut c.page_manager, request);
+        assert!(!response.added); // Not added because it was updated
+
+        // Test that insert works
+        assert_eq!(c.get("key"), Some("val2".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn insert_exec_mode_insert_only() {
+        let mut c = C::new();
+        // Insert root
+        c.add("key", "val1");
+
+        // Test that insert only works
+        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::ModeInsertOnly);
+        let response = c.tree.insert_exec(&mut c.page_manager, request);
+        assert!(!response.added); // Not added because it was updated
+
+        // Test that insert works
+        assert_eq!(c.get("key"), Some("val1".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn insert_exec_mode_update_only_success() {
+        let mut c = C::new();
+        // Insert root
+        c.add("key", "val1");
+
+        // Test that update only works
+        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::ModeUpdateOnly);
+        let response = c.tree.insert_exec(&mut c.page_manager, request);
+        assert!(!response.added); // Added because it was inserted
+
+        // Test that insert works
+        assert_eq!(c.get("key"), Some("val2".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn insert_exec_mode_update_only_fail() {
+        let mut c = C::new();
+        // Insert root
+        c.add("key", "val1");
+
+        // Test that update only works
+        let mut request =
+            InsertRequest::new("new_key".as_bytes().to_vec(), "new_val".as_bytes().to_vec())
+                .mode(InsertMode::ModeUpdateOnly);
+        let response = c.tree.insert_exec(&mut c.page_manager, request);
+        assert!(!response.added); // Not added because it was updated
+
+        // Test that insert works
+        assert_eq!(c.get("new_key"), None);
     }
 }

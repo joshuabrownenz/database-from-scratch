@@ -105,7 +105,6 @@ impl Debug for FLNode {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

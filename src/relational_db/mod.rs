@@ -408,22 +408,22 @@ mod tests {
             deleted
         }
 
-         // func (r *R) del(table string, rec Record) bool {
-    // 	deleted, err := r.db.Delete(table, rec)
-    // 	assert(err == nil)
+        // func (r *R) del(table string, rec Record) bool {
+        // 	deleted, err := r.db.Delete(table, rec)
+        // 	assert(err == nil)
 
-    // 	idx := r.findRef(table, rec)
-    // 	if deleted {
-    // 		assert(idx >= 0)
-    // 		records := r.ref[table]
-    // 		copy(records[idx:], records[idx+1:])
-    // 		r.ref[table] = records[:len(records)-1]
-    // 	} else {
-    // 		assert(idx == -1)
-    // 	}
+        // 	idx := r.findRef(table, rec)
+        // 	if deleted {
+        // 		assert(idx >= 0)
+        // 		records := r.ref[table]
+        // 		copy(records[idx:], records[idx+1:])
+        // 		r.ref[table] = records[:len(records)-1]
+        // 	} else {
+        // 		assert(idx == -1)
+        // 	}
 
-    // 	return deleted
-    // }
+        // 	return deleted
+        // }
     }
 
     #[test]
@@ -477,8 +477,6 @@ mod tests {
 
         assert_eq!(values, decoded);
     }
-
-   
 
     #[test]
     fn test_table_create() {
@@ -602,7 +600,7 @@ mod tests {
             let ok = r.get(&"tbl_test".to_string(), &mut rec);
             assert!(ok);
         }
-        
+
         {
             let mut key = Record::new();
             key.add_int64("ki1".to_string(), 1)
@@ -613,8 +611,7 @@ mod tests {
             key.set_bytes("ks2".to_string(), "hello".as_bytes().to_vec());
             let deleted = r.del("tbl_test".to_string(), key);
             assert!(deleted);
-            
-        }  
+        }
     }
 
     // func TestTableEncoding(t *testing.T) {
