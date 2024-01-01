@@ -5,15 +5,42 @@ use self::b_node::{
     BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER,
 };
 
-use crate::{
-    free_list::page_manager,
-    relational_db::requests::{InsertMode, InsertRequest},
-};
-
 enum MergeDirection {
     Left(BNode),
     Right(BNode),
     None,
+}
+
+#[derive(PartialEq)]
+pub enum InsertMode {
+    Upsert,     // insert or replace
+    UpdateOnly, // update existing keys
+    InsertOnly, // only add new keys
+}
+
+pub struct InsertRequest {
+    // tree: &'a mut BTree, // Not sure why we need this
+    // out
+    pub added: bool, // added a new key
+    // in
+    pub key: Vec<u8>,
+    pub val: Vec<u8>,
+    pub mode: InsertMode,
+}
+
+impl InsertRequest {
+    pub fn new(key: Vec<u8>, val: Vec<u8>) -> InsertRequest {
+        InsertRequest {
+            key,
+            val,
+            mode: InsertMode::Upsert,
+            added: false,
+        }
+    }
+    pub fn mode(mut self, mode: InsertMode) -> InsertRequest {
+        self.mode = mode;
+        self
+    }
 }
 
 pub trait BTreePageManager {
@@ -52,7 +79,7 @@ impl BTree {
             NodeType::Leaf => {
                 match node_to_have_key.get_key(idx).cmp(&request.key) {
                     Ordering::Equal => {
-                        if request.mode == InsertMode::ModeInsertOnly {
+                        if request.mode == InsertMode::InsertOnly {
                             // Key already in the tree and mode is insert only. Don't insert.
                             return None;
                         }
@@ -64,7 +91,7 @@ impl BTree {
                         Some(node_to_have_key.leaf_update(idx, &request.key, &request.val))
                     }
                     _ => {
-                        if request.mode == InsertMode::ModeUpdateOnly {
+                        if request.mode == InsertMode::UpdateOnly {
                             // Key not in the tree and mode is update only. Don't insert.
                             return None;
                         }
@@ -704,8 +731,8 @@ mod tests {
         c.add("key", "val1");
 
         // Test that upsert works
-        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
-            .mode(InsertMode::ModeUpsert);
+        let request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::Upsert);
         let response = c.tree.insert_exec(&mut c.page_manager, request);
         assert!(!response.added); // Not added because it was updated
 
@@ -720,8 +747,8 @@ mod tests {
         c.add("key", "val1");
 
         // Test that insert only works
-        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
-            .mode(InsertMode::ModeInsertOnly);
+        let request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::InsertOnly);
         let response = c.tree.insert_exec(&mut c.page_manager, request);
         assert!(!response.added); // Not added because it was updated
 
@@ -736,8 +763,8 @@ mod tests {
         c.add("key", "val1");
 
         // Test that update only works
-        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
-            .mode(InsertMode::ModeUpdateOnly);
+        let request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::UpdateOnly);
         let response = c.tree.insert_exec(&mut c.page_manager, request);
         assert!(!response.added); // Added because it was inserted
 
@@ -752,9 +779,9 @@ mod tests {
         c.add("key", "val1");
 
         // Test that update only works
-        let mut request =
+        let request =
             InsertRequest::new("new_key".as_bytes().to_vec(), "new_val".as_bytes().to_vec())
-                .mode(InsertMode::ModeUpdateOnly);
+                .mode(InsertMode::UpdateOnly);
         let response = c.tree.insert_exec(&mut c.page_manager, request);
         assert!(!response.added); // Not added because it was updated
 

@@ -8,7 +8,7 @@ fn test_kv_store_integration() {
     let mut kv = KV::open("test_run_dir/test.db".to_string()).unwrap();
 
     // Test `set` and `get`
-    kv.set(&"key1".as_bytes().to_vec(), &"value1".as_bytes().to_vec())
+    kv.set("key1".as_bytes(), "value1".as_bytes())
         .unwrap();
     assert_eq!(
         kv.get(&"key1".as_bytes().to_vec()).unwrap(),
@@ -16,7 +16,7 @@ fn test_kv_store_integration() {
     );
 
     // Test `set` and `remove`
-    kv.set(&"key2".as_bytes().to_vec(), &"value2".as_bytes().to_vec())
+    kv.set("key2".as_bytes(), "value2".as_bytes())
         .unwrap();
     kv.del(&"key2".as_bytes().to_vec()).unwrap();
     assert!(kv.get(&"key2".as_bytes().to_vec()).is_none());

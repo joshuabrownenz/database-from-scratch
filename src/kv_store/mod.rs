@@ -6,9 +6,8 @@ use std::{
 extern crate byteorder;
 
 use crate::{
-    b_tree::BTree,
+    b_tree::{BTree, InsertMode, InsertRequest},
     free_list::FreeList,
-    relational_db::requests::{InsertMode, InsertRequest},
 };
 
 pub struct KV {
@@ -56,8 +55,8 @@ impl KV {
         self.tree.get_value(&self.free, key)
     }
 
-    pub fn set(&mut self, key: &Vec<u8>, value: &Vec<u8>) -> io::Result<()> {
-        self.tree.insert(&mut self.free, key.clone(), value.clone());
+    pub fn set(&mut self, key: &[u8], value: &[u8]) -> io::Result<()> {
+        self.tree.insert(&mut self.free, key.to_vec(), value.to_vec());
         self.flush_pages()
     }
 
@@ -80,10 +79,10 @@ impl KV {
     }
 
     pub fn update(&mut self, key: Vec<u8>, value: Vec<u8>, mode: InsertMode) -> io::Result<bool> {
-        let mut req = InsertRequest::new(key, value).mode(mode);
-        let req = self.tree.insert_exec(&mut self.free, req);
+        let req = InsertRequest::new(key, value).mode(mode);
+        let res = self.tree.insert_exec(&mut self.free, req);
         self.flush_pages()?;
-        Ok(req.added)
+        Ok(res.added)
     }
 }
 
@@ -192,7 +191,7 @@ mod tests {
         }
 
         kv.close();
-        let mut kv = new_kv("test_kv.db", false);
+        let kv = new_kv("test_kv.db", false);
         for i in 0..10000 {
             println!("Step 3: {}", i);
             let key = format!("key{}", i).as_bytes().to_vec();
