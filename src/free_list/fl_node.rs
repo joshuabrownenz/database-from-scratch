@@ -104,3 +104,89 @@ impl Debug for FLNode {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new() {
+        let node = FLNode::new(10, 20);
+        assert_eq!(node.size(), 10);
+        assert_eq!(node.total(), 0);
+        assert_eq!(node.next(), 20);
+    }
+
+    #[test]
+    fn test_from() {
+        let mut data = [0; BTREE_PAGE_SIZE];
+        LittleEndian::write_u16(&mut data[..2], FL_NODE_TYPE);
+        LittleEndian::write_u16(&mut data[2..4], 10);
+        LittleEndian::write_u64(&mut data[12..12 + U64_SIZE], 20);
+        let node = FLNode::from(&data);
+        assert_eq!(node.size(), 10);
+        assert_eq!(node.total(), 0);
+        assert_eq!(node.next(), 20);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_from_invalid_type() {
+        let mut data = [0; BTREE_PAGE_SIZE];
+        LittleEndian::write_u16(&mut data[..2], 0);
+        FLNode::from(&data);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_from_invalid_length() {
+        let data = [0; BTREE_PAGE_SIZE - 1];
+        FLNode::from(&data);
+    }
+
+    #[test]
+    fn test_get_data() {
+        let node = FLNode::new(10, 20);
+        let data = node.get_data();
+        assert_eq!(data.len(), BTREE_PAGE_SIZE);
+    }
+
+    #[test]
+    fn test_set_total() {
+        let mut data = [0; BTREE_PAGE_SIZE];
+        FLNode::set_total(&mut data, 10);
+        assert_eq!(LittleEndian::read_u64(&data[4..4 + U64_SIZE]), 10);
+    }
+
+    #[test]
+    fn test_get_ptr() {
+        let mut node = FLNode::new(2, 0);
+        node.set_ptr(0, 10);
+        node.set_ptr(1, 20);
+        assert_eq!(node.get_ptr(0), 10);
+        assert_eq!(node.get_ptr(1), 20);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_get_ptr_out_of_bounds() {
+        let node = FLNode::new(2, 0);
+        node.get_ptr(2);
+    }
+
+    #[test]
+    fn test_set_ptr() {
+        let mut node = FLNode::new(2, 0);
+        node.set_ptr(0, 10);
+        node.set_ptr(1, 20);
+        assert_eq!(node.get_ptr(0), 10);
+        assert_eq!(node.get_ptr(1), 20);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_ptr_out_of_bounds() {
+        let mut node = FLNode::new(2, 0);
+        node.set_ptr(2, 10);
+    }
+}

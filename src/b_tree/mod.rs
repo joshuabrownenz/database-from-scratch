@@ -5,6 +5,11 @@ use self::b_node::{
     BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER,
 };
 
+use crate::{
+    free_list::page_manager,
+    relational_db::requests::{InsertMode, InsertRequest},
+};
+
 enum MergeDirection {
     Left(BNode),
     Right(BNode),
@@ -27,25 +32,48 @@ impl BTree {
         BTree { root: 0 }
     }
 
-    // insert a KV into a node, the result might be split into 2 nodes.
-    // the caller is responsible for deallocating the input node
-    // and splitting and allocating result nodes. Returns the result node which is double sized
+    /**
+     * insert a KV into a node, the result might be split into 2 nodes.
+    * the caller is responsible for deallocating the input node
+    * and splitting and allocating result nodes. Returns the result node which is double sized
+
+    * Returns Some(BNode) if an update takes place
+     */
     fn tree_insert<P: BTreePageManager>(
         &mut self,
         page_manager: &mut P,
         node_to_have_key: BNode,
-        key: &Vec<u8>,
-        val: &Vec<u8>,
-    ) -> BNode {
+        request: &mut InsertRequest,
+    ) -> Option<BNode> {
         // Where to insert
-        let idx = node_to_have_key.node_lookup_le(key);
+        let idx = node_to_have_key.node_lookup_le(&request.key);
 
         match node_to_have_key.b_type() {
-            NodeType::Leaf => match node_to_have_key.get_key(idx).cmp(key) {
-                Ordering::Equal => node_to_have_key.leaf_update(idx, key, val),
-                _ => node_to_have_key.leaf_insert(idx + 1, key, val),
-            },
-            NodeType::Node => self.node_insert(page_manager, node_to_have_key, idx, key, val),
+            NodeType::Leaf => {
+                match node_to_have_key.get_key(idx).cmp(&request.key) {
+                    Ordering::Equal => {
+                        if request.mode == InsertMode::ModeInsertOnly {
+                            // Key already in the tree and mode is insert only. Don't insert.
+                            return None;
+                        }
+                        if node_to_have_key.get_val(idx).cmp(&request.val) == Ordering::Equal {
+                            // Key and value already in the tree so don't insert.
+                            return None;
+                        }
+
+                        Some(node_to_have_key.leaf_update(idx, &request.key, &request.val))
+                    }
+                    _ => {
+                        if request.mode == InsertMode::ModeUpdateOnly {
+                            // Key not in the tree and mode is update only. Don't insert.
+                            return None;
+                        }
+                        request.added = true;
+                        Some(node_to_have_key.leaf_insert(idx + 1, &request.key, &request.val))
+                    }
+                }
+            }
+            NodeType::Node => self.node_insert(page_manager, node_to_have_key, idx, request),
         }
     }
 
@@ -73,28 +101,28 @@ impl BTree {
         page_manager: &mut P,
         node_to_have_key: BNode,
         idx: u16,
-        key: &Vec<u8>,
-        val: &Vec<u8>,
-    ) -> BNode {
+        request: &mut InsertRequest,
+    ) -> Option<BNode> {
         // get and deallocate the kid node
         let kid_ptr = node_to_have_key.get_ptr(idx);
-        let mut kid_node = page_manager.page_get(kid_ptr);
-        page_manager.page_del(kid_ptr);
+        let kid_node = page_manager.page_get(kid_ptr);
 
         //recursive insertion to the kid node
-        kid_node = self.tree_insert(page_manager, kid_node, key, val);
+        let kid_node = self.tree_insert(page_manager, kid_node, request)?;
+
+        page_manager.page_del(kid_ptr);
 
         //split the result
         let (_, splited) = kid_node.split3();
 
         // update the kids links
-        self.node_replace_kid_n(
+        Some(self.node_replace_kid_n(
             page_manager,
             2 * BTREE_PAGE_SIZE,
             node_to_have_key,
             idx,
             splited,
-        )
+        ))
     }
 
     fn node_delete<P: BTreePageManager>(
@@ -249,26 +277,44 @@ impl BTree {
     pub fn insert<P: BTreePageManager>(
         &mut self,
         page_manager: &mut P,
-        key: &Vec<u8>,
-        val: &Vec<u8>,
-    ) {
-        assert!(!key.is_empty());
-        assert!(key.len() <= BTREE_MAX_KEY_SIZE);
-        assert!(val.len() <= BTREE_MAX_VAL_SIZE);
+        key: Vec<u8>,
+        val: Vec<u8>,
+    ) -> bool {
+        let request = InsertRequest::new(key, val);
+        let response = self.insert_exec(page_manager, request);
+        response.added
+    }
+
+    pub fn insert_exec<P: BTreePageManager>(
+        &mut self,
+        page_manager: &mut P,
+        mut request: InsertRequest,
+    ) -> InsertRequest {
+        assert!(!request.key.is_empty());
+        assert!(request.key.len() <= BTREE_MAX_KEY_SIZE);
+        assert!(request.val.len() <= BTREE_MAX_VAL_SIZE);
 
         if self.root == 0 {
             let mut root = BNode::new(NodeType::Leaf, 2);
 
             root.node_append_kv(0, 0, &vec![], &vec![]);
-            root.node_append_kv(1, 0, key, val);
+            root.node_append_kv(1, 0, &request.key, &request.val);
             self.root = page_manager.page_new(root);
-            return;
+
+            request.added = true;
+            return request;
         };
 
         let node = page_manager.page_get(self.root);
+
+        let updated = self.tree_insert(page_manager, node, &mut request);
+        if updated.is_none() {
+            return request;
+        }
+
         page_manager.page_del(self.root);
 
-        let node = self.tree_insert(page_manager, node, key, val);
+        let node = updated.unwrap();
         let (n_split, mut splitted) = node.split3();
         if n_split > 1 {
             // the root was split, add a new level
@@ -282,6 +328,8 @@ impl BTree {
         } else {
             self.root = page_manager.page_new(splitted.remove(0));
         };
+
+        request
     }
 
     pub fn get_value<P: BTreePageManager>(
@@ -386,8 +434,8 @@ mod tests {
         fn add(&mut self, key: &str, val: &str) {
             self.tree.insert(
                 &mut self.page_manager,
-                &key.as_bytes().to_vec(),
-                &val.as_bytes().to_vec(),
+                key.as_bytes().to_vec(),
+                val.as_bytes().to_vec(),
             );
             self.reference.insert(key.to_string(), val.to_string());
         }
@@ -647,5 +695,70 @@ mod tests {
             }
             c.verify();
         }
+    }
+
+    #[test]
+    fn insert_exec_mode_upsert() {
+        let mut c = C::new();
+        // Insert root
+        c.add("key", "val1");
+
+        // Test that upsert works
+        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::ModeUpsert);
+        let response = c.tree.insert_exec(&mut c.page_manager, request);
+        assert!(!response.added); // Not added because it was updated
+
+        // Test that insert works
+        assert_eq!(c.get("key"), Some("val2".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn insert_exec_mode_insert_only() {
+        let mut c = C::new();
+        // Insert root
+        c.add("key", "val1");
+
+        // Test that insert only works
+        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::ModeInsertOnly);
+        let response = c.tree.insert_exec(&mut c.page_manager, request);
+        assert!(!response.added); // Not added because it was updated
+
+        // Test that insert works
+        assert_eq!(c.get("key"), Some("val1".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn insert_exec_mode_update_only_success() {
+        let mut c = C::new();
+        // Insert root
+        c.add("key", "val1");
+
+        // Test that update only works
+        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::ModeUpdateOnly);
+        let response = c.tree.insert_exec(&mut c.page_manager, request);
+        assert!(!response.added); // Added because it was inserted
+
+        // Test that insert works
+        assert_eq!(c.get("key"), Some("val2".as_bytes().to_vec()));
+    }
+
+    #[test]
+    fn insert_exec_mode_update_only_fail() {
+        let mut c = C::new();
+        // Insert root
+        c.add("key", "val1");
+
+        // Test that update only works
+        let mut request =
+            InsertRequest::new("new_key".as_bytes().to_vec(), "new_val".as_bytes().to_vec())
+                .mode(InsertMode::ModeUpdateOnly);
+        let response = c.tree.insert_exec(&mut c.page_manager, request);
+        assert!(!response.added); // Not added because it was updated
+
+        // Test that insert works
+        assert_eq!(c.get("new_key"), None);
     }
 }

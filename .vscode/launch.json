@@ -1,0 +1,102 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'database_from_scratch'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=database_from_scratch"
+                ],
+                "filter": {
+                    "name": "database_from_scratch",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'database_from_scratch'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=database_from_scratch",
+                    "--package=database_from_scratch"
+                ],
+                "filter": {
+                    "name": "database_from_scratch",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'database_from_scratch'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=database_from_scratch",
+                    "--package=database_from_scratch"
+                ],
+                "filter": {
+                    "name": "database_from_scratch",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'relational_db_integration'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=relational_db_integration",
+                    "--package=database_from_scratch"
+                ],
+                "filter": {
+                    "name": "relational_db_integration",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'test_kv_store_integration'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=test_kv_store_integration",
+                    "--package=database_from_scratch"
+                ],
+                "filter": {
+                    "name": "test_kv_store_integration",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
