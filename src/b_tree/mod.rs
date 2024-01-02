@@ -1,9 +1,10 @@
-use std::cmp::Ordering;
-
 pub mod b_node;
+pub mod btree_iter;
+
 use self::b_node::{
     BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER,
 };
+use std::cmp::Ordering;
 
 enum MergeDirection {
     Left(BNode),
