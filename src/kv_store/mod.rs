@@ -54,7 +54,7 @@ impl KV {
     }
 
     pub fn set(&mut self, key: &[u8], value: &[u8]) -> io::Result<()> {
-        self.tree.insert(key.to_vec(), value.to_vec());
+        self.tree.insert(key, value);
         self.flush_pages()
     }
 

@@ -175,8 +175,7 @@ mod tests {
         }
 
         fn add(&mut self, key: &str, val: &str) {
-            self.tree
-                .insert(key.as_bytes().to_vec(), val.as_bytes().to_vec());
+            self.tree.insert(key.as_bytes(), val.as_bytes());
             self.reference.insert(key.to_string(), val.to_string());
         }
 

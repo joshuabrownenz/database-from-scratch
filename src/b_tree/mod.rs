@@ -285,8 +285,8 @@ impl<'a, B: BTreePageManager> BTree<B> {
         true
     }
 
-    pub fn insert(&mut self, key: Vec<u8>, val: Vec<u8>) -> bool {
-        let request = InsertRequest::new(key, val);
+    pub fn insert(&mut self, key: &[u8], val: &[u8]) -> bool {
+        let request = InsertRequest::new(key.to_vec(), val.to_vec());
         let response = self.insert_exec(request);
         response.added
     }
@@ -476,8 +476,7 @@ mod tests {
         }
 
         fn add(&mut self, key: &str, val: &str) {
-            self.tree
-                .insert(key.as_bytes().to_vec(), val.as_bytes().to_vec());
+            self.tree.insert(key.as_bytes(), val.as_bytes());
             self.reference.insert(key.to_string(), val.to_string());
         }
 
