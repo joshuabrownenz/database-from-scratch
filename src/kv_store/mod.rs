@@ -11,8 +11,7 @@ use crate::{
 };
 
 pub struct KV {
-    tree: BTree,
-    free: FreeList,
+    tree: BTree<FreeList>,
 }
 
 impl KV {
@@ -37,8 +36,7 @@ impl KV {
         let free = FreeList::new(file_pointer)?;
 
         let mut kv = KV {
-            free,
-            tree: BTree::new(),
+            tree: BTree::new(free),
         };
 
         kv.master_load()?;
@@ -48,39 +46,39 @@ impl KV {
     }
 
     pub fn close(self) {
-        self.free.close();
+        self.tree.page_manager.close();
     }
 
     pub fn get(&self, key: &Vec<u8>) -> Option<Vec<u8>> {
-        self.tree.get_value(&self.free, key)
+        self.tree.get_value(key)
     }
 
     pub fn set(&mut self, key: &[u8], value: &[u8]) -> io::Result<()> {
-        self.tree.insert(&mut self.free, key.to_vec(), value.to_vec());
+        self.tree.insert(key.to_vec(), value.to_vec());
         self.flush_pages()
     }
 
     pub fn del(&mut self, key: &Vec<u8>) -> io::Result<bool> {
-        let deleted = self.tree.delete(&mut self.free, key);
+        let deleted = self.tree.delete(key);
         self.flush_pages()?;
 
         Ok(deleted)
     }
 
     fn master_load(&mut self) -> io::Result<()> {
-        let master_page = self.free.master_load()?;
+        let master_page = self.tree.page_manager.master_load()?;
         self.tree.root = master_page.btree_root;
         Ok(())
     }
 
     fn flush_pages(&mut self) -> io::Result<()> {
-        self.free.flush_pages(self.tree.root)?;
+        self.tree.page_manager.flush_pages(self.tree.root)?;
         Ok(())
     }
 
     pub fn update(&mut self, key: Vec<u8>, value: Vec<u8>, mode: InsertMode) -> io::Result<bool> {
         let req = InsertRequest::new(key, value).mode(mode);
-        let res = self.tree.insert_exec(&mut self.free, req);
+        let res = self.tree.insert_exec( req);
         self.flush_pages()?;
         Ok(res.added)
     }
@@ -106,11 +104,11 @@ mod tests {
     }
 
     fn debug_free_list(kv: &KV) {
-        kv.free.debug_free_list();
+        kv.tree.page_manager.debug_free_list();
     }
 
     fn get_free_list_total(kv: &KV) -> u64 {
-        kv.free.get_free_list_total()
+        kv.tree.page_manager.get_free_list_total()
     }
 
     #[test]
