@@ -9,7 +9,7 @@ pub mod records;
 pub mod tables;
 pub mod value;
 
-use byteorder::{ByteOrder, LittleEndian};
+use byteorder::{ByteOrder, LittleEndian, BigEndian};
 use records::Record;
 
 use self::{tables::TableDef, value::Value};
@@ -161,7 +161,7 @@ impl DB {
                 Value::Int64(_) => {
                     let mut buf: [u8; 8] = [0; 8];
                     buf.copy_from_slice(&in_bytes[pos..pos + 8]);
-                    let i64 = LittleEndian::read_i64(&buf);
+                    let i64 = BigEndian::read_i64(&buf);
                     *value = Value::Int64(Some(i64));
                     pos += 8;
                 }
@@ -185,7 +185,7 @@ impl DB {
             match value {
                 Value::Int64(i) => {
                     let mut buf: [u8; 8] = [0; 8];
-                    LittleEndian::write_i64(&mut buf, i.unwrap());
+                    BigEndian::write_i64(&mut buf, i.unwrap());
                     out.extend(buf);
                 }
                 Value::Bytes(b) => {
