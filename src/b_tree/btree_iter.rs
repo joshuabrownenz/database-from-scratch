@@ -1,17 +1,33 @@
+use std::path;
+
 use crate::{b_tree::b_node::NodeType, free_list::page_manager};
 
 use super::{b_node::BNode, BTree, BTreePageManager};
 
-pub struct BTreeIterator<'a> {
+pub struct BTreeIterator<'a, B: BTreePageManager> {
     tree: &'a BTree,
-    page_manager: &'a dyn BTreePageManager,
+    page_manager: &'a B,
     path: Vec<BNode>,
     positions: Vec<u16>,
 }
 
 type Item = (Vec<u8>, Vec<u8>);
 
-impl BTreeIterator<'_> {
+impl<'a, B : BTreePageManager> BTreeIterator<'a, B> {
+    pub fn new(
+        tree: &'a BTree,
+        page_manager: &'a B,
+        path: Vec<BNode>,
+        positions: Vec<u16>,
+    ) -> BTreeIterator<'a, B> {
+        BTreeIterator {
+            tree,
+            page_manager,
+            path,
+            positions,
+        }
+    }
+
     /** Gets the current key value pair */
     pub fn deref(&self) -> Item {
         let node = &self.path[self.positions.len() - 1];

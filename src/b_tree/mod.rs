@@ -1,8 +1,9 @@
 pub mod b_node;
 pub mod btree_iter;
 
-use self::b_node::{
-    BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER,
+use self::{
+    b_node::{BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER},
+    btree_iter::BTreeIterator,
 };
 use std::cmp::Ordering;
 
@@ -55,7 +56,7 @@ pub struct BTree {
     pub root: u64,
 }
 
-impl BTree {
+impl<'a> BTree {
     pub fn new() -> BTree {
         BTree { root: 0 }
     }
@@ -387,15 +388,44 @@ impl BTree {
             }
         }
     }
+
+    pub fn seekLE<B: BTreePageManager>(
+        &'a mut self,
+        page_manager: &'a mut B,
+        key: &Vec<u8>,
+    ) -> BTreeIterator<'a, B> {
+        let mut path = Vec::new();
+        let mut positions = Vec::new();
+
+        let mut ptr = self.root;
+        while ptr != 0 {
+            let node = page_manager.page_get(ptr);
+            let node_type = node.b_type();
+            let idx = node.node_lookup_le(key);
+            if node_type == NodeType::Node {
+                ptr = node.get_ptr(idx);
+            } else {
+                ptr = 0;
+            }
+            path.push(node);
+            positions.push(idx);
+        }
+
+        BTreeIterator::new(self, page_manager, path, positions)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::{
+        collections::{HashMap, HashSet},
+        ops::Index,
+    };
 
     use super::*;
     extern crate rand;
 
+    use rand::seq::SliceRandom;
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
     struct PageManager {
@@ -789,4 +819,145 @@ mod tests {
         // Test that insert works
         assert_eq!(c.get("new_key"), None);
     }
+
+    #[test]
+    fn seek_le_test_small_equal_to() {
+        let mut c = C::new();
+        c.add("key1", "val1");
+        c.add("key2", "val2");
+        c.add("key3", "val3");
+        c.add("key4", "val4");
+        c.add("key5", "val5");
+
+        // Test seekLE with existing key
+        let mut iter = c
+            .tree
+            .seekLE(&mut c.page_manager, &"key3".as_bytes().to_vec());
+        assert_eq!(
+            iter.deref(),
+            ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
+        );
+        assert!(iter.next());
+        assert_eq!(
+            iter.deref(),
+            ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+        );
+        assert!(iter.next());
+        assert_eq!(
+            iter.deref(),
+            ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
+        );
+        assert!(!iter.next());
+    }
+
+    #[test]
+    fn seek_le_test_small_less_than() {
+        let mut c = C::new();
+        c.add("key1", "val1");
+        c.add("key2", "val2");
+        c.add("key4", "val4");
+        c.add("key5", "val5");
+
+        // Test seekLE with existing key
+        let mut iter = c
+            .tree
+            .seekLE(&mut c.page_manager, &"key3".as_bytes().to_vec());
+        assert_eq!(
+            iter.deref(),
+            ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+        );
+        assert!(iter.next());
+        assert_eq!(
+            iter.deref(),
+            ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+        );
+        assert!(iter.next());
+        assert_eq!(
+            iter.deref(),
+            ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
+        );
+        assert!(!iter.next());
+    }
+
+    #[test]
+    fn seek_le_test_large_equal_to() {
+        let mut c = C::new();
+        for i in 1..=100 {
+            c.add(&format!("key{}", i), &format!("val{}", i));
+        }
+
+        let mut orderedItems = (1..=100)
+            .map(|i| {
+                (
+                    format!("key{}", i).as_bytes().to_vec(),
+                    format!("val{}", i).as_bytes().to_vec(),
+                )
+            })
+            .collect::<Vec<(Vec<u8>, Vec<u8>)>>();
+        orderedItems.sort();
+
+        // Test seekLE with existing key
+        let mut iter = c
+            .tree
+            .seekLE(&mut c.page_manager, &"key50".as_bytes().to_vec());
+
+        let index = orderedItems
+            .iter()
+            .position(|(key, _)| key == &"key51".as_bytes().to_vec());
+        for (expected_key, expected_value) in orderedItems.iter().skip(index.unwrap()) {
+            assert!(iter.next());
+            let (key, value) = iter.deref();
+            assert_eq!(expected_key, &key);
+            assert_eq!(expected_value, &value);
+        }
+
+        assert!(!iter.next());
+    }
+
+    #[test]
+    fn seek_le_large_test_access() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut c = C::new();
+        for i in 1..=10000 {
+            c.add(
+                &format!("key{}", fmix32(i as u32)),
+                &format!("val{}", fmix32(-i as u32)),
+            );
+        }
+
+        let mut randomised_items = (1..=10000)
+            .map(|i| {
+                (
+                    format!("key{}", fmix32(i as u32)).as_bytes().to_vec(),
+                    format!("val{}", fmix32(-i as u32)).as_bytes().to_vec(),
+                )
+            })
+            .collect::<Vec<(Vec<u8>, Vec<u8>)>>();
+
+        randomised_items.shuffle(&mut rng);
+
+        for (key, value) in randomised_items.iter() {
+            let iter = c.tree.seekLE(&mut c.page_manager, key);
+            assert_eq!(iter.deref(), (key.clone(), value.clone()));
+        }
+    }
+
+#[test]
+fn seek_le_test_large_greater_than() {
+    let mut c = C::new();
+    c.add("key1", "val1");
+    c.add("key2", "val2");
+    c.add("key4", "val4");
+    c.add("key5", "val5");
+
+    // Test seekLE with key larger than any key in the tree
+    let mut iter = c
+        .tree
+        .seekLE(&mut c.page_manager, &"key6".as_bytes().to_vec());
+    assert_eq!(
+        iter.deref(),
+        ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
+    );
+    assert!(!iter.next());
+}
 }
