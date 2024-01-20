@@ -1,19 +1,55 @@
-use std::cmp::Ordering;
-
 pub mod b_node;
-use self::b_node::{
-    BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER,
-};
+pub mod btree_iter;
 
-use crate::{
-    free_list::page_manager,
-    relational_db::requests::{InsertMode, InsertRequest},
+use self::{
+    b_node::{BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER},
+    btree_iter::BTreeIterator,
 };
+use std::cmp::Ordering;
 
 enum MergeDirection {
     Left(BNode),
     Right(BNode),
     None,
+}
+
+pub enum CmpOption {
+    GT,
+    GE,
+    LT,
+    LE,
+}
+
+#[derive(PartialEq)]
+pub enum InsertMode {
+    Upsert,     // insert or replace
+    UpdateOnly, // update existing keys
+    InsertOnly, // only add new keys
+}
+
+pub struct InsertRequest {
+    // tree: &'a mut BTree, // Not sure why we need this
+    // out
+    pub added: bool, // added a new key
+    // in
+    pub key: Vec<u8>,
+    pub val: Vec<u8>,
+    pub mode: InsertMode,
+}
+
+impl InsertRequest {
+    pub fn new(key: Vec<u8>, val: Vec<u8>) -> InsertRequest {
+        InsertRequest {
+            key,
+            val,
+            mode: InsertMode::Upsert,
+            added: false,
+        }
+    }
+    pub fn mode(mut self, mode: InsertMode) -> InsertRequest {
+        self.mode = mode;
+        self
+    }
 }
 
 pub trait BTreePageManager {
@@ -27,7 +63,7 @@ pub struct BTree {
     pub root: u64,
 }
 
-impl BTree {
+impl<'a> BTree {
     pub fn new() -> BTree {
         BTree { root: 0 }
     }
@@ -52,7 +88,7 @@ impl BTree {
             NodeType::Leaf => {
                 match node_to_have_key.get_key(idx).cmp(&request.key) {
                     Ordering::Equal => {
-                        if request.mode == InsertMode::ModeInsertOnly {
+                        if request.mode == InsertMode::InsertOnly {
                             // Key already in the tree and mode is insert only. Don't insert.
                             return None;
                         }
@@ -64,7 +100,7 @@ impl BTree {
                         Some(node_to_have_key.leaf_update(idx, &request.key, &request.val))
                     }
                     _ => {
-                        if request.mode == InsertMode::ModeUpdateOnly {
+                        if request.mode == InsertMode::UpdateOnly {
                             // Key not in the tree and mode is update only. Don't insert.
                             return None;
                         }
@@ -359,6 +395,62 @@ impl BTree {
             }
         }
     }
+
+    fn seek_le<B: BTreePageManager>(
+        &'a mut self,
+        page_manager: &'a mut B,
+        key: &Vec<u8>,
+    ) -> BTreeIterator<'a, B> {
+        let mut path = Vec::new();
+        let mut positions = Vec::new();
+
+        let mut ptr = self.root;
+        while ptr != 0 {
+            let node = page_manager.page_get(ptr);
+            let node_type = node.b_type();
+            let idx = node.node_lookup_le(key);
+            if node_type == NodeType::Node {
+                ptr = node.get_ptr(idx);
+            } else {
+                ptr = 0;
+            }
+            path.push(node);
+            positions.push(idx);
+        }
+
+        BTreeIterator::new(self, page_manager, path, positions)
+    }
+
+    pub fn seek<B: BTreePageManager>(
+        &'a mut self,
+        page_manager: &'a mut B,
+        key: &Vec<u8>,
+        compare: CmpOption,
+    ) -> BTreeIterator<'a, B> {
+        let mut iter = self.seek_le(page_manager, key);
+        if let CmpOption::LE = compare {
+        } else {
+            let (current_key, _) = iter.deref();
+            if !Self::cmp_ok(&current_key, &compare, key) {
+                // Off by one
+                match compare {
+                    CmpOption::GE | CmpOption::GT => iter.next(),
+                    CmpOption::LE | CmpOption::LT => iter.prev(),
+                };
+            };
+        };
+
+        iter
+    }
+
+    fn cmp_ok(key: &Vec<u8>, compare: &CmpOption, reference: &Vec<u8>) -> bool {
+        match compare {
+            CmpOption::GT => key > reference,
+            CmpOption::GE => key >= reference,
+            CmpOption::LT => key < reference,
+            CmpOption::LE => key <= reference,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -368,6 +460,7 @@ mod tests {
     use super::*;
     extern crate rand;
 
+    use rand::seq::SliceRandom;
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
     struct PageManager {
@@ -704,8 +797,8 @@ mod tests {
         c.add("key", "val1");
 
         // Test that upsert works
-        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
-            .mode(InsertMode::ModeUpsert);
+        let request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::Upsert);
         let response = c.tree.insert_exec(&mut c.page_manager, request);
         assert!(!response.added); // Not added because it was updated
 
@@ -720,8 +813,8 @@ mod tests {
         c.add("key", "val1");
 
         // Test that insert only works
-        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
-            .mode(InsertMode::ModeInsertOnly);
+        let request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::InsertOnly);
         let response = c.tree.insert_exec(&mut c.page_manager, request);
         assert!(!response.added); // Not added because it was updated
 
@@ -736,8 +829,8 @@ mod tests {
         c.add("key", "val1");
 
         // Test that update only works
-        let mut request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
-            .mode(InsertMode::ModeUpdateOnly);
+        let request = InsertRequest::new("key".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+            .mode(InsertMode::UpdateOnly);
         let response = c.tree.insert_exec(&mut c.page_manager, request);
         assert!(!response.added); // Added because it was inserted
 
@@ -752,13 +845,234 @@ mod tests {
         c.add("key", "val1");
 
         // Test that update only works
-        let mut request =
+        let request =
             InsertRequest::new("new_key".as_bytes().to_vec(), "new_val".as_bytes().to_vec())
-                .mode(InsertMode::ModeUpdateOnly);
+                .mode(InsertMode::UpdateOnly);
         let response = c.tree.insert_exec(&mut c.page_manager, request);
         assert!(!response.added); // Not added because it was updated
 
         // Test that insert works
         assert_eq!(c.get("new_key"), None);
     }
+
+    #[test]
+    fn seek_le_test_small_equal_to() {
+        let mut c = C::new();
+        c.add("key1", "val1");
+        c.add("key2", "val2");
+        c.add("key3", "val3");
+        c.add("key4", "val4");
+        c.add("key5", "val5");
+
+        // Test seek_le with existing key
+        let mut iter = c
+            .tree
+            .seek_le(&mut c.page_manager, &"key3".as_bytes().to_vec());
+        assert_eq!(
+            iter.deref(),
+            ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
+        );
+        assert!(iter.next());
+        assert_eq!(
+            iter.deref(),
+            ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+        );
+        assert!(iter.next());
+        assert_eq!(
+            iter.deref(),
+            ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
+        );
+        assert!(!iter.next());
+    }
+
+    #[test]
+    fn seek_le_test_small_less_than() {
+        let mut c = C::new();
+        c.add("key1", "val1");
+        c.add("key2", "val2");
+        c.add("key4", "val4");
+        c.add("key5", "val5");
+
+        // Test seek_le with existing key
+        let mut iter = c
+            .tree
+            .seek_le(&mut c.page_manager, &"key3".as_bytes().to_vec());
+        assert_eq!(
+            iter.deref(),
+            ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+        );
+        assert!(iter.next());
+        assert_eq!(
+            iter.deref(),
+            ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+        );
+        assert!(iter.next());
+        assert_eq!(
+            iter.deref(),
+            ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
+        );
+        assert!(!iter.next());
+    }
+
+    #[test]
+    fn seek_le_test_large_equal_to() {
+        let mut c = C::new();
+        for i in 1..=100 {
+            c.add(&format!("key{}", i), &format!("val{}", i));
+        }
+
+        let mut orderedItems = (1..=100)
+            .map(|i| {
+                (
+                    format!("key{}", i).as_bytes().to_vec(),
+                    format!("val{}", i).as_bytes().to_vec(),
+                )
+            })
+            .collect::<Vec<(Vec<u8>, Vec<u8>)>>();
+        orderedItems.sort();
+
+        // Test seek_le with existing key
+        let mut iter = c
+            .tree
+            .seek_le(&mut c.page_manager, &"key50".as_bytes().to_vec());
+
+        let index = orderedItems
+            .iter()
+            .position(|(key, _)| key == &"key51".as_bytes().to_vec());
+        for (expected_key, expected_value) in orderedItems.iter().skip(index.unwrap()) {
+            assert!(iter.next());
+            let (key, value) = iter.deref();
+            assert_eq!(expected_key, &key);
+            assert_eq!(expected_value, &value);
+        }
+
+        assert!(!iter.next());
+    }
+
+    #[test]
+    fn seek_le_large_test_access() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut c = C::new();
+        for i in 1..=10000 {
+            c.add(
+                &format!("key{}", fmix32(i as u32)),
+                &format!("val{}", fmix32(-i as u32)),
+            );
+        }
+
+        let mut randomised_items = (1..=10000)
+            .map(|i| {
+                (
+                    format!("key{}", fmix32(i as u32)).as_bytes().to_vec(),
+                    format!("val{}", fmix32(-i as u32)).as_bytes().to_vec(),
+                )
+            })
+            .collect::<Vec<(Vec<u8>, Vec<u8>)>>();
+
+        randomised_items.shuffle(&mut rng);
+
+        for (key, value) in randomised_items.iter() {
+            let iter = c.tree.seek_le(&mut c.page_manager, key);
+            assert_eq!(iter.deref(), (key.clone(), value.clone()));
+        }
+    }
+
+    #[test]
+    fn seek_le_test_large_greater_than() {
+        let mut c = C::new();
+        c.add("key1", "val1");
+        c.add("key2", "val2");
+        c.add("key4", "val4");
+        c.add("key5", "val5");
+
+        // Test seek_le with key larger than any key in the tree
+        let mut iter = c
+            .tree
+            .seek_le(&mut c.page_manager, &"key6".as_bytes().to_vec());
+        assert_eq!(
+            iter.deref(),
+            ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
+        );
+        assert!(!iter.next());
+    }
+
+#[test]
+fn seek_test() {
+    let mut c = C::new();
+    c.add("key1", "val1");
+    c.add("key2", "val2");
+    c.add("key3", "val3");
+    c.add("key4", "val4");
+    c.add("key5", "val5");
+
+    // GE
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::GE);
+    assert_eq!(
+        iter.deref(),
+        ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
+    );
+
+    // GT
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::GT);
+    assert_eq!(
+        iter.deref(),
+        ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+    );
+
+    // LE
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::LE);
+    assert_eq!(
+        iter.deref(),
+        ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
+    );
+
+    // LT
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::LT);
+    assert_eq!(
+        iter.deref(),
+        ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+    );
+
+}
+
+#[test]
+fn seek_test_missing_key() {
+    let mut c = C::new();
+    c.add("key1", "val1");
+    c.add("key2", "val2");
+    c.add("key4", "val4");
+    c.add("key5", "val5");
+
+    // GE
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::GE);
+    assert_eq!(
+        iter.deref(),
+        ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+    );
+
+    // GT
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::GT);
+    assert_eq!(
+        iter.deref(),
+        ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+    );
+
+    // LE
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::LE);
+    assert_eq!(
+        iter.deref(),
+        ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+    );
+
+    // LT
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::LT);
+    assert_eq!(
+        iter.deref(),
+        ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+    );
+}
+
+
+
+
 }

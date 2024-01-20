@@ -1,20 +1,18 @@
 use std::{
-    alloc::System,
     collections::HashMap,
     io::{self, Error, ErrorKind},
 };
 
-use crate::kv_store::KV;
+use crate::{b_tree::InsertMode, kv_store::KV};
 
 pub mod records;
-pub mod requests;
 pub mod tables;
 pub mod value;
 
-use byteorder::{ByteOrder, LittleEndian};
+use byteorder::{ByteOrder, LittleEndian, BigEndian};
 use records::Record;
 
-use self::{requests::InsertMode, tables::TableDef, value::Value};
+use self::{tables::TableDef, value::Value};
 
 lazy_static! {
     pub static ref TABLE_DEF_META: TableDef = TableDef {
@@ -41,7 +39,7 @@ lazy_static! {
 
 const TABLE_PREFIX_MIN: u32 = 100;
 
-struct DB {
+pub struct DB {
     path: String,
     // internals
     kv: KV,
@@ -72,9 +70,10 @@ impl DB {
         }
         let value_raw = value_raw.unwrap();
 
-        for i in table_def.primary_keys..table_def.columns.len() {
+        (table_def.primary_keys..table_def.columns.len()).for_each(|i| {
             values[i] = Value::u32_to_empty_value(table_def.types[i]);
-        }
+        });
+
         DB::decode_values(&value_raw, &mut values[table_def.primary_keys..]);
         record
             .columns
@@ -91,7 +90,7 @@ impl DB {
         record: &Record,
         mode: InsertMode,
     ) -> io::Result<bool> {
-        let mut values: Vec<Value> = table_def.check_record(record, table_def.columns.len())?;
+        let values: Vec<Value> = table_def.check_record(record, table_def.columns.len())?;
 
         let key = DB::encode_key(
             None,
@@ -114,19 +113,19 @@ impl DB {
     }
 
     pub fn insert(&mut self, table: String, record: Record) -> io::Result<bool> {
-        self.set(table, record, InsertMode::ModeInsertOnly)
+        self.set(table, record, InsertMode::InsertOnly)
     }
 
     pub fn update(&mut self, table: String, record: Record) -> io::Result<bool> {
-        self.set(table, record, InsertMode::ModeUpdateOnly)
+        self.set(table, record, InsertMode::UpdateOnly)
     }
 
     pub fn upsert(&mut self, table: String, record: Record) -> io::Result<bool> {
-        self.set(table, record, InsertMode::ModeUpsert)
+        self.set(table, record, InsertMode::Upsert)
     }
 
     fn db_delete(&mut self, table_def: &TableDef, record: Record) -> io::Result<bool> {
-        let mut values: Vec<Value> = table_def.check_record(&record, table_def.primary_keys)?;
+        let values: Vec<Value> = table_def.check_record(&record, table_def.primary_keys)?;
 
         let key = DB::encode_key(
             None,
@@ -152,25 +151,24 @@ impl DB {
         let mut buf: [u8; 4] = [0; 4];
         LittleEndian::write_u32(&mut buf, prefix);
         out.extend(buf);
-        let out = DB::encode_values(Some(out), values);
-        out
+        DB::encode_values(Some(out), values)
     }
 
     fn decode_values(in_bytes: &Vec<u8>, values_out: &mut [Value]) {
         let mut pos = 0;
-        for i in 0..values_out.len() {
-            match values_out[i] {
+        for value in values_out.iter_mut() {
+            match value {
                 Value::Int64(_) => {
                     let mut buf: [u8; 8] = [0; 8];
                     buf.copy_from_slice(&in_bytes[pos..pos + 8]);
-                    let i64 = LittleEndian::read_i64(&buf);
-                    values_out[i] = Value::Int64(Some(i64));
+                    let i64 = BigEndian::read_i64(&buf);
+                    *value = Value::Int64(Some(i64));
                     pos += 8;
                 }
                 Value::Bytes(_) => {
                     let end_offset = in_bytes[pos..].iter().position(|&x| x == 0).unwrap();
                     let bytes = Value::unescape_string(&in_bytes[pos..pos + end_offset]);
-                    values_out[i] = Value::Bytes(Some(bytes));
+                    *value = Value::Bytes(Some(bytes));
                     pos += end_offset + 1;
                 }
                 Value::Error => {
@@ -182,12 +180,12 @@ impl DB {
     }
 
     fn encode_values(out: Option<Vec<u8>>, values: &[Value]) -> Vec<u8> {
-        let mut out = out.unwrap_or(vec![]);
+        let mut out = out.unwrap_or_default();
         for value in values {
             match value {
                 Value::Int64(i) => {
                     let mut buf: [u8; 8] = [0; 8];
-                    LittleEndian::write_i64(&mut buf, i.unwrap());
+                    BigEndian::write_i64(&mut buf, i.unwrap());
                     out.extend(buf);
                 }
                 Value::Bytes(b) => {
@@ -211,7 +209,7 @@ impl DB {
 
         match self.tables.get(table) {
             None => {
-                let table_def = self.get_table_def_db(&table);
+                let table_def = self.get_table_def_db(table);
                 if table_def.is_some() {
                     self.tables
                         .insert(table.clone(), table_def.clone().unwrap());
@@ -241,7 +239,7 @@ impl DB {
     }
 
     /** Adds a new table to the DB */
-    fn table_new(&mut self, mut table_def: TableDef) -> io::Result<()> {
+    pub fn table_new(&mut self, mut table_def: TableDef) -> io::Result<()> {
         table_def.check()?;
 
         // check the existing table
@@ -279,7 +277,7 @@ impl DB {
         let mut next_prefix = vec![0; 4];
         LittleEndian::write_u32(&mut next_prefix, table_def.prefix + 1);
         meta.set_bytes("val".to_string(), next_prefix);
-        self.db_update(&TABLE_DEF_META, &meta, InsertMode::ModeUpsert)?;
+        self.db_update(&TABLE_DEF_META, &meta, InsertMode::Upsert)?;
 
         // Store the definition
         let definition = match table_def.to_json() {
@@ -293,7 +291,7 @@ impl DB {
         };
 
         table.add_bytes("def".to_string(), definition.as_bytes().to_vec());
-        self.db_update(&TABLE_DEF_TABLE, &table, InsertMode::ModeUpsert)?;
+        self.db_update(&TABLE_DEF_TABLE, &table, InsertMode::Upsert)?;
 
         Ok(())
     }
@@ -302,13 +300,9 @@ impl DB {
 #[cfg(test)]
 mod tests {
     use byteorder::{ByteOrder, LittleEndian};
-    use serde::de;
-    use std::{fmt::DebugList, fs};
+    use std::fs;
 
-    use crate::{
-        kv_store::KV,
-        relational_db::{requests::InsertMode, value::Value},
-    };
+    use crate::{kv_store::KV, relational_db::value::Value, b_tree::InsertMode};
 
     use super::{records::Record, tables::TableDef, DB, TABLE_DEF_META};
     use std::collections::HashMap;
@@ -346,8 +340,8 @@ mod tests {
             let empty = vec![];
             let records = self.reference.get(table).unwrap_or(&empty);
             let mut found = None;
-            for i in 0..records.len() {
-                if records[i].values[..pkeys] == record.values[..pkeys] {
+            for (i, record_at_i) in records.iter().enumerate() {
+                if record_at_i.values[..pkeys] == record.values[..pkeys] {
                     assert!(found.is_none());
                     found = Some(i);
                 }
@@ -442,7 +436,7 @@ mod tests {
         meta.add_bytes("val".to_string(), vec![5; 4]);
         let ok = rdb
             .db
-            .db_update(&TABLE_DEF_META, &meta, InsertMode::ModeUpsert);
+            .db_update(&TABLE_DEF_META, &meta, InsertMode::Upsert);
         assert!(ok.is_ok());
         assert!(ok.unwrap());
 

@@ -123,8 +123,6 @@ impl TableDef {
 
 #[cfg(test)]
 mod tests {
-    use std::result;
-
     use super::*;
 
     #[test]

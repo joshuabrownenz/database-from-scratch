@@ -4,7 +4,7 @@ fn main() {
     let kv = KV::open("main.db".to_string());
     let mut kv = kv.unwrap_or_else(|_| panic!("Failed to open database"));
 
-    kv.set(&"hello".as_bytes().to_vec(), &"world".as_bytes().to_vec())
+    kv.set("hello".as_bytes(), "world".as_bytes())
         .unwrap();
     println!(
         "hello {}",
