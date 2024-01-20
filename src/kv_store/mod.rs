@@ -49,7 +49,7 @@ impl KV {
         self.tree.page_manager.close();
     }
 
-    pub fn get(&self, key: &Vec<u8>) -> Option<Vec<u8>> {
+    pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.tree.get_value(key)
     }
 
@@ -58,7 +58,7 @@ impl KV {
         self.flush_pages()
     }
 
-    pub fn del(&mut self, key: &Vec<u8>) -> io::Result<bool> {
+    pub fn del(&mut self, key: &[u8]) -> io::Result<bool> {
         let deleted = self.tree.delete(key);
         self.flush_pages()?;
 
@@ -76,8 +76,8 @@ impl KV {
         Ok(())
     }
 
-    pub fn update(&mut self, key: Vec<u8>, value: Vec<u8>, mode: InsertMode) -> io::Result<bool> {
-        let req = InsertRequest::new(key, value).mode(mode);
+    pub fn update(&mut self, key: &[u8], value: &[u8], mode: InsertMode) -> io::Result<bool> {
+        let req = InsertRequest::new(key.to_vec(), value.to_vec()).mode(mode);
         let res = self.tree.insert_exec(req);
         self.flush_pages()?;
         Ok(res.added)

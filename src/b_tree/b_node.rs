@@ -142,7 +142,8 @@ impl BNode {
         HEADER + 10 * num_keys + self.get_offset(idx)
     }
 
-    pub fn get_key(&self, idx: u16) -> Vec<u8> {
+    /** `get_key` returns the key at idx. It returns a reference to the key instead of the actual key for ease of comparison*/
+    pub fn get_key(&self, idx: u16) -> &[u8] {
         assert!(idx < self.num_keys());
 
         // Position of the key
@@ -152,10 +153,10 @@ impl BNode {
         let key_length = LittleEndian::read_u16(&self.data[pos..pos + U16_SIZE]);
 
         let key_pos = pos + 4;
-        self.data[key_pos..key_pos + key_length as usize].to_vec()
+        self.data[key_pos..key_pos + key_length as usize].as_ref()
     }
 
-    pub fn get_val(&self, idx: u16) -> Vec<u8> {
+    pub fn get_val(&self, idx: u16) -> &[u8] {
         assert!(idx < self.num_keys());
 
         // Position of the start of the kv block
@@ -169,7 +170,7 @@ impl BNode {
             LittleEndian::read_u16(&self.data[val_length_pos..val_length_pos + U16_SIZE]);
 
         let val_pos = pos + 2 * U16_SIZE + key_length as usize;
-        self.data[val_pos..val_pos + val_length as usize].to_vec()
+        self.data[val_pos..val_pos + val_length as usize].as_ref()
     }
 
     // node size in bytes
@@ -182,7 +183,7 @@ impl BNode {
 
     // returns the first kid node whose range intersects the key. (kid[i] <= key)
     // TODO: bisect
-    pub fn node_lookup_le(&self, key: &Vec<u8>) -> u16 {
+    pub fn node_lookup_le(&self, key: &[u8]) -> u16 {
         let mut low: u16 = 1;
         let mut high: u16 = self.num_keys() - 1;
         let mut found: u16 = 0;
@@ -205,7 +206,7 @@ impl BNode {
     }
 
     /** Add a new key to a leaf node. Returns a double sized node which needs to be dealt with */
-    pub fn leaf_insert(self, idx: u16, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
+    pub fn leaf_insert(self, idx: u16, key: &[u8], val: &[u8]) -> BNode {
         let old_num_keys = self.num_keys();
 
         let mut new_node =
@@ -218,7 +219,7 @@ impl BNode {
     }
 
     /** Update a key in a leaf node. Returns a double sized node which needs to be dealt with */
-    pub fn leaf_update(self, idx: u16, key: &Vec<u8>, val: &Vec<u8>) -> BNode {
+    pub fn leaf_update(self, idx: u16, key: &[u8], val: &[u8]) -> BNode {
         let old_num_keys = self.num_keys();
 
         let mut new_node = BNode::new_with_size(NodeType::Leaf, old_num_keys, 2 * BTREE_PAGE_SIZE);
@@ -251,12 +252,12 @@ impl BNode {
         new_node
     }
 
-    pub fn node_replace_2_kid(self, idx: u16, ptr: u64, key: &Vec<u8>) -> BNode {
+    pub fn node_replace_2_kid(self, idx: u16, ptr: u64, key: &[u8]) -> BNode {
         let old_num_keys = self.num_keys();
         let mut new_node = BNode::new(NodeType::Node, old_num_keys - 1);
 
         new_node.node_append_range(&self, 0, 0, idx);
-        new_node.node_append_kv(idx, ptr, key, &vec![]);
+        new_node.node_append_kv(idx, ptr, key, &[]);
         new_node.node_append_range(&self, idx + 1, idx + 2, old_num_keys - idx - 2);
 
         new_node
@@ -295,7 +296,7 @@ impl BNode {
     }
 
     // copy a KV into the position
-    pub fn node_append_kv(&mut self, idx: u16, ptr: u64, key: &Vec<u8>, val: &Vec<u8>) {
+    pub fn node_append_kv(&mut self, idx: u16, ptr: u64, key: &[u8], val: &[u8]) {
         // ptrs
         self.set_ptr(idx, ptr);
 
@@ -488,7 +489,7 @@ mod tests {
         // Assuming the keys are 4 bytes each
         for i in 0..3 {
             let key = vec![i as u8; 4];
-            bnode.node_append_kv(i, 0, &key, &vec![]);
+            bnode.node_append_kv(i, 0, &key, &[]);
         }
 
         for i in 0..3 {
@@ -504,7 +505,7 @@ mod tests {
         // Assuming the values are 6 bytes each
         for i in 0..3 {
             let val = vec![i as u8; 6];
-            bnode.node_append_kv(i, 0, &vec![], &val);
+            bnode.node_append_kv(i, 0, &[], &val);
             assert_eq!(bnode.get_val(i), val);
         }
     }
@@ -524,13 +525,13 @@ mod tests {
         // Assuming the keys are [0, 1, 2, 3, 4]
         for i in 0..5 {
             let key = vec![i as u8];
-            bnode.node_append_kv(i, 0, &key, &vec![]);
+            bnode.node_append_kv(i, 0, &key, &[]);
         }
 
-        assert_eq!(bnode.node_lookup_le(&vec![2]), 2);
-        assert_eq!(bnode.node_lookup_le(&vec![5]), 4);
-        assert_eq!(bnode.node_lookup_le(&vec![0]), 0);
-        assert_eq!(bnode.node_lookup_le(&vec![6]), 4);
+        assert_eq!(bnode.node_lookup_le(&[2]), 2);
+        assert_eq!(bnode.node_lookup_le(&[5]), 4);
+        assert_eq!(bnode.node_lookup_le(&[0]), 0);
+        assert_eq!(bnode.node_lookup_le(&[6]), 4);
     }
 
     #[test]

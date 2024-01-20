@@ -99,7 +99,7 @@ impl DB {
         );
 
         let value = DB::encode_values(None, &values[table_def.primary_keys..]);
-        self.kv.update(key, value, mode)
+        self.kv.update(&key, &value, mode)
     }
 
     fn set(&mut self, table: String, record: Record, mode: InsertMode) -> io::Result<bool> {

@@ -7,8 +7,8 @@ fn main() {
     kv.set("hello".as_bytes(), "world".as_bytes()).unwrap();
     println!(
         "hello {}",
-        String::from_utf8(kv.get(&"hello".as_bytes().to_vec()).unwrap()).unwrap()
+        String::from_utf8(kv.get("hello".as_bytes()).unwrap()).unwrap()
     );
-    kv.del(&"hello".as_bytes().to_vec()).unwrap();
+    kv.del("hello".as_bytes()).unwrap();
     kv.close();
 }
