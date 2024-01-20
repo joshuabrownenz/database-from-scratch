@@ -13,6 +13,13 @@ enum MergeDirection {
     None,
 }
 
+pub enum CmpOption {
+    GT,
+    GE,
+    LT,
+    LE,
+}
+
 #[derive(PartialEq)]
 pub enum InsertMode {
     Upsert,     // insert or replace
@@ -389,7 +396,7 @@ impl<'a> BTree {
         }
     }
 
-    pub fn seekLE<B: BTreePageManager>(
+    fn seek_le<B: BTreePageManager>(
         &'a mut self,
         page_manager: &'a mut B,
         key: &Vec<u8>,
@@ -413,14 +420,42 @@ impl<'a> BTree {
 
         BTreeIterator::new(self, page_manager, path, positions)
     }
+
+    pub fn seek<B: BTreePageManager>(
+        &'a mut self,
+        page_manager: &'a mut B,
+        key: &Vec<u8>,
+        compare: CmpOption,
+    ) -> BTreeIterator<'a, B> {
+        let mut iter = self.seek_le(page_manager, key);
+        if let CmpOption::LE = compare {
+        } else {
+            let (current_key, _) = iter.deref();
+            if !Self::cmp_ok(&current_key, &compare, key) {
+                // Off by one
+                match compare {
+                    CmpOption::GE | CmpOption::GT => iter.next(),
+                    CmpOption::LE | CmpOption::LT => iter.prev(),
+                };
+            };
+        };
+
+        iter
+    }
+
+    fn cmp_ok(key: &Vec<u8>, compare: &CmpOption, reference: &Vec<u8>) -> bool {
+        match compare {
+            CmpOption::GT => key > reference,
+            CmpOption::GE => key >= reference,
+            CmpOption::LT => key < reference,
+            CmpOption::LE => key <= reference,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{HashMap, HashSet},
-        ops::Index,
-    };
+    use std::collections::{HashMap, HashSet};
 
     use super::*;
     extern crate rand;
@@ -829,10 +864,10 @@ mod tests {
         c.add("key4", "val4");
         c.add("key5", "val5");
 
-        // Test seekLE with existing key
+        // Test seek_le with existing key
         let mut iter = c
             .tree
-            .seekLE(&mut c.page_manager, &"key3".as_bytes().to_vec());
+            .seek_le(&mut c.page_manager, &"key3".as_bytes().to_vec());
         assert_eq!(
             iter.deref(),
             ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
@@ -858,10 +893,10 @@ mod tests {
         c.add("key4", "val4");
         c.add("key5", "val5");
 
-        // Test seekLE with existing key
+        // Test seek_le with existing key
         let mut iter = c
             .tree
-            .seekLE(&mut c.page_manager, &"key3".as_bytes().to_vec());
+            .seek_le(&mut c.page_manager, &"key3".as_bytes().to_vec());
         assert_eq!(
             iter.deref(),
             ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
@@ -896,10 +931,10 @@ mod tests {
             .collect::<Vec<(Vec<u8>, Vec<u8>)>>();
         orderedItems.sort();
 
-        // Test seekLE with existing key
+        // Test seek_le with existing key
         let mut iter = c
             .tree
-            .seekLE(&mut c.page_manager, &"key50".as_bytes().to_vec());
+            .seek_le(&mut c.page_manager, &"key50".as_bytes().to_vec());
 
         let index = orderedItems
             .iter()
@@ -937,27 +972,107 @@ mod tests {
         randomised_items.shuffle(&mut rng);
 
         for (key, value) in randomised_items.iter() {
-            let iter = c.tree.seekLE(&mut c.page_manager, key);
+            let iter = c.tree.seek_le(&mut c.page_manager, key);
             assert_eq!(iter.deref(), (key.clone(), value.clone()));
         }
     }
 
+    #[test]
+    fn seek_le_test_large_greater_than() {
+        let mut c = C::new();
+        c.add("key1", "val1");
+        c.add("key2", "val2");
+        c.add("key4", "val4");
+        c.add("key5", "val5");
+
+        // Test seek_le with key larger than any key in the tree
+        let mut iter = c
+            .tree
+            .seek_le(&mut c.page_manager, &"key6".as_bytes().to_vec());
+        assert_eq!(
+            iter.deref(),
+            ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
+        );
+        assert!(!iter.next());
+    }
+
 #[test]
-fn seek_le_test_large_greater_than() {
+fn seek_test() {
+    let mut c = C::new();
+    c.add("key1", "val1");
+    c.add("key2", "val2");
+    c.add("key3", "val3");
+    c.add("key4", "val4");
+    c.add("key5", "val5");
+
+    // GE
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::GE);
+    assert_eq!(
+        iter.deref(),
+        ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
+    );
+
+    // GT
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::GT);
+    assert_eq!(
+        iter.deref(),
+        ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+    );
+
+    // LE
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::LE);
+    assert_eq!(
+        iter.deref(),
+        ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
+    );
+
+    // LT
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::LT);
+    assert_eq!(
+        iter.deref(),
+        ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+    );
+
+}
+
+#[test]
+fn seek_test_missing_key() {
     let mut c = C::new();
     c.add("key1", "val1");
     c.add("key2", "val2");
     c.add("key4", "val4");
     c.add("key5", "val5");
 
-    // Test seekLE with key larger than any key in the tree
-    let mut iter = c
-        .tree
-        .seekLE(&mut c.page_manager, &"key6".as_bytes().to_vec());
+    // GE
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::GE);
     assert_eq!(
         iter.deref(),
-        ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
+        ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
     );
-    assert!(!iter.next());
+
+    // GT
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::GT);
+    assert_eq!(
+        iter.deref(),
+        ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
+    );
+
+    // LE
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::LE);
+    assert_eq!(
+        iter.deref(),
+        ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+    );
+
+    // LT
+    let iter = c.tree.seek(&mut c.page_manager, &"key3".as_bytes().to_vec(), CmpOption::LT);
+    assert_eq!(
+        iter.deref(),
+        ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
+    );
 }
+
+
+
+
 }
