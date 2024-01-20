@@ -78,7 +78,7 @@ impl KV {
 
     pub fn update(&mut self, key: Vec<u8>, value: Vec<u8>, mode: InsertMode) -> io::Result<bool> {
         let req = InsertRequest::new(key, value).mode(mode);
-        let res = self.tree.insert_exec( req);
+        let res = self.tree.insert_exec(req);
         self.flush_pages()?;
         Ok(res.added)
     }

@@ -58,7 +58,8 @@ impl<'a, B: BTreePageManager> BTreeIterator<'a, B> {
             let node = &self.path[level];
             assert!(node.b_type() == NodeType::Node);
             let child_node = self
-                .tree.page_manager
+                .tree
+                .page_manager
                 .page_get(node.get_ptr(self.positions[level]));
             self.positions[level + 1] = 0;
             self.path[level + 1] = child_node;
@@ -94,7 +95,8 @@ impl<'a, B: BTreePageManager> BTreeIterator<'a, B> {
             let node = &self.path[level];
             assert!(node.b_type() == NodeType::Node);
             let child_node = self
-                .tree.page_manager
+                .tree
+                .page_manager
                 .page_get(node.get_ptr(self.positions[level]));
             self.positions[level + 1] = child_node.num_keys() - 1;
             self.path[level + 1] = child_node;
