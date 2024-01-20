@@ -9,7 +9,7 @@ pub mod records;
 pub mod tables;
 pub mod value;
 
-use byteorder::{ByteOrder, LittleEndian, BigEndian};
+use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use records::Record;
 
 use self::{tables::TableDef, value::Value};
@@ -302,7 +302,7 @@ mod tests {
     use byteorder::{ByteOrder, LittleEndian};
     use std::fs;
 
-    use crate::{kv_store::KV, relational_db::value::Value, b_tree::InsertMode};
+    use crate::{b_tree::InsertMode, kv_store::KV, relational_db::value::Value};
 
     use super::{records::Record, tables::TableDef, DB, TABLE_DEF_META};
     use std::collections::HashMap;
@@ -434,9 +434,7 @@ mod tests {
 
         // Write the value into test_key
         meta.add_bytes("val".to_string(), vec![5; 4]);
-        let ok = rdb
-            .db
-            .db_update(&TABLE_DEF_META, &meta, InsertMode::Upsert);
+        let ok = rdb.db.db_update(&TABLE_DEF_META, &meta, InsertMode::Upsert);
         assert!(ok.is_ok());
         assert!(ok.unwrap());
 
