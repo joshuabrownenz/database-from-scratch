@@ -2,13 +2,14 @@ pub mod fl_node;
 mod master_page;
 pub mod mmap;
 pub mod page_manager;
+use crate::prelude::*;
 
 use crate::{
     b_tree::{b_node::BNode, BTreePageManager},
     free_list::fl_node::MAX_FREE_LIST_IN_PAGE,
 };
 
-use std::{collections::VecDeque, fs::File, io};
+use std::{collections::VecDeque, fs::File};
 
 use self::{fl_node::FLNode, master_page::MasterPage, page_manager::PageManager};
 pub struct FreeList {
@@ -20,7 +21,7 @@ pub struct FreeList {
 }
 
 impl FreeList {
-    pub fn new(file_pointer: File) -> io::Result<Self> {
+    pub fn new(file_pointer: File) -> Result<Self> {
         Ok(Self {
             head: 0,
             nfree: 0,
@@ -28,13 +29,13 @@ impl FreeList {
         })
     }
 
-    pub fn master_load(&mut self) -> io::Result<MasterPage> {
+    pub fn master_load(&mut self) -> Result<MasterPage> {
         let master_page = self.page_manager.master_load()?;
         self.head = master_page.free_list_head;
         Ok(master_page)
     }
 
-    pub fn set_master_page(&mut self, btree_root: u64) -> io::Result<()> {
+    pub fn set_master_page(&mut self, btree_root: u64) -> Result<()> {
         self.page_manager.set_master_page(btree_root, self.head)
     }
 
@@ -82,13 +83,13 @@ impl FreeList {
         ptr
     }
 
-    pub fn flush_pages(&mut self, btree_root: u64) -> io::Result<()> {
+    pub fn flush_pages(&mut self, btree_root: u64) -> Result<()> {
         self.write_pages()?;
         self.sync_pages(btree_root)?;
         Ok(())
     }
 
-    fn sync_pages(&mut self, btree_root: u64) -> io::Result<()> {
+    fn sync_pages(&mut self, btree_root: u64) -> Result<()> {
         self.page_manager.flush()?;
         self.nfree = 0;
 
@@ -99,7 +100,7 @@ impl FreeList {
         Ok(())
     }
 
-    fn write_pages(&mut self) -> io::Result<()> {
+    fn write_pages(&mut self) -> Result<()> {
         // update the free list
         let freed_ptrs = self.page_manager.get_freed_ptrs();
         self.update(self.nfree, freed_ptrs);

@@ -1,8 +1,8 @@
-use std::io::{self, Error, ErrorKind};
-
 use super::{records::Record, value::Value};
 use serde::{Deserialize, Serialize};
 use serde_json;
+
+use crate::prelude::*;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TableDef {
@@ -19,7 +19,7 @@ impl TableDef {
     // reorder a record and check for missing columns.
     // n == tdef.PKeys: record is exactly a primary key
     // n == len(tdef.Cols): record contains all columns
-    pub fn check_record(&self, record: &Record, n: usize) -> io::Result<Vec<Value>> {
+    pub fn check_record(&self, record: &Record, n: usize) -> Result<Vec<Value>> {
         let values: Vec<Value> = self.reorder_record(record)?;
         self.values_complete(&values, n)?;
         Ok(values)
@@ -41,7 +41,7 @@ impl TableDef {
     // 	}
     // 	return out, nil
     // }
-    fn reorder_record(&self, record: &Record) -> io::Result<Vec<Value>> {
+    fn reorder_record(&self, record: &Record) -> Result<Vec<Value>> {
         assert!(record.columns.len() == record.values.len());
         let mut out: Vec<Value> = vec![Value::Error; self.columns.len()];
         for (i, c) in self.columns.iter().enumerate() {
@@ -50,34 +50,31 @@ impl TableDef {
                 continue; // leave this column uninitialized
             }
             if v.unwrap().type_as_u32() != self.types[i] {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!("bad column type: {}", self.columns[i]),
-                ));
+                return Err(Error::Generic(format!(
+                    "bad column type: {}",
+                    self.columns[i]
+                )));
             }
             out[i] = v.unwrap().clone();
         }
         Ok(out)
     }
 
-    fn values_complete(&self, values: &[Value], n: usize) -> io::Result<()> {
+    fn values_complete(&self, values: &[Value], n: usize) -> Result<()> {
         for (i, v) in values.iter().enumerate() {
             if i < n && v.type_as_u32() == 0 {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!("missing column: {}", self.columns[i]),
-                ));
+                return Err(Error::Generic(format!(
+                    "missing column: {}",
+                    self.columns[i]
+                )));
             } else if i >= n && v.type_as_u32() != 0 {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    format!("extra column: {}", self.columns[i]),
-                ));
+                return Err(Error::Generic(format!("extra column: {}", self.columns[i])));
             }
         }
         Ok(())
     }
 
-    pub fn to_json(&self) -> Result<String, String> {
+    pub fn to_json(&self) -> Result<String> {
         Ok(serde_json::to_string(self).unwrap())
     }
 
@@ -85,37 +82,28 @@ impl TableDef {
         serde_json::from_str(json.as_str()).unwrap()
     }
 
-    pub fn check(&self) -> io::Result<()> {
+    pub fn check(&self) -> Result<()> {
         // verify the table definition
         if self.name.is_empty() {
-            return Err(Error::new(
-                ErrorKind::Other,
-                String::from("Table name is empty"),
-            ));
+            return Err(Error::Static("Table name is empty"));
         }
         if self.columns.is_empty() {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("Table '{}' has no columns.", self.name),
-            ));
+            return Err(Error::Generic(format!(
+                "Table '{}' has no columns.",
+                self.name
+            )));
         }
         if self.columns.len() != self.types.len() {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "Table '{}' has mismatched number of columns and types.",
-                    self.name
-                ),
-            ));
+            return Err(Error::Generic(format!(
+                "Table '{}' has mismatched number of columns and types.",
+                self.name
+            )));
         }
         if !(1 <= self.primary_keys && self.primary_keys <= self.columns.len()) {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "Table '{}' has an invalid number of primary keys.",
-                    self.name
-                ),
-            ));
+            return Err(Error::Generic(format!(
+                "Table '{}' has an invalid number of primary keys.",
+                self.name
+            )));
         }
         Ok(())
     }
@@ -171,7 +159,11 @@ mod tests {
 
         let result = table_def.check_record(&record, 1);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "extra column: col2");
+        if let Error::Generic(msg) = result.unwrap_err() {
+            assert_eq!(msg, "extra column: col2");
+        } else {
+            panic!("wrong error type");
+        }
     }
 
     #[test]

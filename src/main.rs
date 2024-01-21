@@ -1,3 +1,5 @@
+// #![allow(unused)] // For beginning only.
+
 use database_from_scratch::kv_store::KV;
 
 fn main() {

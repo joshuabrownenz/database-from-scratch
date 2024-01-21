@@ -2,9 +2,9 @@ extern crate libc;
 extern crate memmap2; // Use the memmap2 crate for memory-mapped file support // Use the libc crate for the mmap flags
 
 use crate::b_tree::b_node::{Node, BTREE_PAGE_SIZE};
+use crate::prelude::*;
 use memmap2::{MmapMut, MmapOptions};
 use std::fs::File;
-use std::io::{self, Error, ErrorKind};
 
 pub struct MMap {
     /** file size, can be larger than the database size */
@@ -16,15 +16,12 @@ pub struct MMap {
 }
 
 impl MMap {
-    pub fn new(file_pointer: &File) -> io::Result<MMap> {
+    pub fn new(file_pointer: &File) -> Result<MMap> {
         let metadata = file_pointer.metadata()?;
         let file_size = metadata.len();
 
         if file_size % BTREE_PAGE_SIZE as u64 != 0 {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "File size is not a multiple of page size.",
-            ));
+            return Err(Error::Static("File size is not a multiple of page size."));
         }
 
         let mut mmap_size: usize = 64 << 20; // 64 MiB
@@ -44,7 +41,7 @@ impl MMap {
         })
     }
 
-    pub fn extend_mmap(&mut self, file_pointer: &File, npages: usize) -> io::Result<()> {
+    pub fn extend_mmap(&mut self, file_pointer: &File, npages: usize) -> Result<()> {
         if self.total >= npages * BTREE_PAGE_SIZE {
             return Ok(());
         }
@@ -54,8 +51,7 @@ impl MMap {
                 .offset(self.total as u64)
                 .len(self.total)
                 .map_mut(file_pointer)
-        }
-        .map_err(|e| Error::new(ErrorKind::Other, format!("mmap: {}", e)))?;
+        }?;
 
         self.total *= 2;
         self.chunks.push(chunk);

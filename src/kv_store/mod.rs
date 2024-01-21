@@ -1,10 +1,8 @@
-use std::{
-    fs::OpenOptions,
-    io::{self, Error, ErrorKind},
-};
+use std::fs::OpenOptions;
 
 extern crate byteorder;
 
+use crate::prelude::*;
 use crate::{
     b_tree::{BTree, InsertMode, InsertRequest},
     free_list::FreeList,
@@ -16,7 +14,7 @@ pub struct KV {
 
 impl KV {
     /** Opens the database. Callers responsiblity to close even if open results in an error */
-    pub fn open(path: String) -> io::Result<KV> {
+    pub fn open(path: String) -> Result<KV> {
         // Open or create the file
         let file_open = OpenOptions::new()
             .read(true)
@@ -25,10 +23,10 @@ impl KV {
             .open(path);
 
         if file_open.is_err() {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("failed to open file: {:?}", file_open.unwrap_err()),
-            ));
+            return Err(Error::Generic(format!(
+                "failed to open file: {:?}",
+                file_open.unwrap_err()
+            )));
         }
 
         let file_pointer = file_open.unwrap();
@@ -53,30 +51,30 @@ impl KV {
         self.tree.get_value(key)
     }
 
-    pub fn set(&mut self, key: &[u8], value: &[u8]) -> io::Result<()> {
+    pub fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
         self.tree.insert(key, value);
         self.flush_pages()
     }
 
-    pub fn del(&mut self, key: &[u8]) -> io::Result<bool> {
+    pub fn del(&mut self, key: &[u8]) -> Result<bool> {
         let deleted = self.tree.delete(key);
         self.flush_pages()?;
 
         Ok(deleted)
     }
 
-    fn master_load(&mut self) -> io::Result<()> {
+    fn master_load(&mut self) -> Result<()> {
         let master_page = self.tree.page_manager.master_load()?;
         self.tree.root = master_page.btree_root;
         Ok(())
     }
 
-    fn flush_pages(&mut self) -> io::Result<()> {
+    fn flush_pages(&mut self) -> Result<()> {
         self.tree.page_manager.flush_pages(self.tree.root)?;
         Ok(())
     }
 
-    pub fn update(&mut self, key: &[u8], value: &[u8], mode: InsertMode) -> io::Result<bool> {
+    pub fn update(&mut self, key: &[u8], value: &[u8], mode: InsertMode) -> Result<bool> {
         let req = InsertRequest::new(key.to_vec(), value.to_vec()).mode(mode);
         let res = self.tree.insert_exec(req);
         self.flush_pages()?;

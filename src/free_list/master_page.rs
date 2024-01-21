@@ -1,4 +1,6 @@
-use std::{fs::File, io, os::unix::prelude::FileExt};
+use std::{fs::File, os::unix::prelude::FileExt};
+
+use crate::prelude::*;
 
 use byteorder::{ByteOrder, LittleEndian};
 use fs2::FileExt as OtherFileExt;
@@ -27,7 +29,7 @@ impl MasterPage {
     /// Loads the master page. If the file is empty, the master page will be created on the first write.
     /// If the master page is invalid, an error is returned.
     /// Returns the root of the BTree, and the head of the free list
-    pub fn master_load(mmap: &MMap) -> io::Result<MasterPage> {
+    pub fn master_load(mmap: &MMap) -> Result<MasterPage> {
         if mmap.file == 0 {
             // empty file, the master page will be create on the first write
             return Ok(MasterPage {
@@ -44,7 +46,7 @@ impl MasterPage {
 
         // Check that the master page is valid
         if &data[..16] != DB_SIG.as_bytes() {
-            return Err(io::Error::new(io::ErrorKind::Other, "bad signature"));
+            return Err(Error::Static("bad signature"));
         }
 
         let mut bad =
@@ -54,7 +56,7 @@ impl MasterPage {
         bad = bad || free_list_head < 1 || free_list_head == btree_root;
 
         if bad {
-            return Err(io::Error::new(io::ErrorKind::Other, "bad master page"));
+            return Err(Error::Static("bad master page"));
         }
 
         Ok(MasterPage {
@@ -65,7 +67,7 @@ impl MasterPage {
     }
 
     /// Saves the master page
-    pub fn master_save(&self, file_pointer: &mut File) -> io::Result<()> {
+    pub fn master_save(&self, file_pointer: &mut File) -> Result<()> {
         let mut data = [0; 40];
         // Convert signature to bytes
         assert!(DB_SIG.len() == 16, "const DG_SIG must be 16 bytes");
@@ -77,12 +79,9 @@ impl MasterPage {
         // Atomic write to the master page
         file_pointer.lock_exclusive()?;
         let result = file_pointer.write_at(&data, 0);
-        if result.is_err() {
+        if let Err(err) = result {
             file_pointer.unlock()?;
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("failed to write master page: {:?}", result.unwrap_err()),
-            ));
+            return Err(Error::IO(err));
         }
         file_pointer.unlock()?;
 
