@@ -43,7 +43,7 @@ impl Record {
         }
     }
 
-    pub fn get(&self, key: &String) -> Option<&Value> {
+    pub fn get(&self, key: &str) -> Option<&Value> {
         match self.columns.iter().position(|x| x == key) {
             Some(index) => Some(&self.values[index]),
             None => None,

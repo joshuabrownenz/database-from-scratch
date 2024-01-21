@@ -1,6 +1,4 @@
-use std::path;
-
-use crate::{b_tree::b_node::NodeType, free_list::page_manager};
+use crate::b_tree::b_node::NodeType;
 
 use super::{b_node::BNode, BTree, BTreePageManager};
 
@@ -26,7 +24,7 @@ impl<'a, B: BTreePageManager> BTreeIterator<'a, B> {
         let node = &self.path[self.positions.len() - 1];
         let key = node.get_key(self.positions[self.positions.len() - 1]);
         let value = node.get_val(self.positions[self.positions.len() - 1]);
-        (key, value)
+        (key.to_vec(), value.to_vec())
     }
 
     /** Moves forward along the iterator */
@@ -37,7 +35,6 @@ impl<'a, B: BTreePageManager> BTreeIterator<'a, B> {
     /** Moves forward along the iterator, returns wether the move was a success or not */
     fn nextIter(&mut self, level: usize) -> bool {
         let node = &self.path[level];
-        let num_keys = node.num_keys();
         if self.positions[level] < node.num_keys() - 1 {
             // move within this node
             self.positions[level] += 1;
@@ -108,11 +105,7 @@ impl<'a, B: BTreePageManager> BTreeIterator<'a, B> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        cmp::Ordering,
-        collections::{HashMap, HashSet},
-        fmt::format,
-    };
+    use std::{cmp::Ordering, collections::HashMap};
 
     use crate::b_tree::b_node::{BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE};
 
@@ -182,18 +175,17 @@ mod tests {
         }
 
         fn add(&mut self, key: &str, val: &str) {
-            self.tree
-                .insert(key.as_bytes().to_vec(), val.as_bytes().to_vec());
+            self.tree.insert(key.as_bytes(), val.as_bytes());
             self.reference.insert(key.to_string(), val.to_string());
         }
 
         fn get(&self, key: &str) -> Option<Vec<u8>> {
-            self.tree.get_value(&key.as_bytes().to_vec())
+            self.tree.get_value(key.as_bytes())
         }
 
         fn delete(&mut self, key: &str) -> bool {
             let remove = self.reference.remove(key);
-            let did_remove = self.tree.delete(&key.as_bytes().to_vec());
+            let did_remove = self.tree.delete(key.as_bytes());
             assert_eq!(remove.is_some(), did_remove);
             did_remove
         }

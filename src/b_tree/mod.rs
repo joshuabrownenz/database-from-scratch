@@ -77,7 +77,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
     * the caller is responsible for deallocating the input node
     * and splitting and allocating result nodes. Returns the result node which is double sized
 
-    * Returns Some(BNode) if an update takes place
+    * Returns `Some(BNode)` if an update takes place
      */
     fn tree_insert(
         &mut self,
@@ -116,7 +116,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         }
     }
 
-    fn tree_delete(&mut self, node_with_key: BNode, key: &Vec<u8>) -> Option<BNode> {
+    fn tree_delete(&mut self, node_with_key: BNode, key: &[u8]) -> Option<BNode> {
         // Where to insert
         let idx = node_with_key.node_lookup_le(key);
 
@@ -152,7 +152,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         Some(self.node_replace_kid_n(2 * BTREE_PAGE_SIZE, node_to_have_key, idx, splited))
     }
 
-    fn node_delete(&mut self, node_with_key: BNode, idx: u16, key: &Vec<u8>) -> Option<BNode> {
+    fn node_delete(&mut self, node_with_key: BNode, idx: u16, key: &[u8]) -> Option<BNode> {
         // recurse into the kid
         let kid_ptr = node_with_key.get_ptr(idx);
         let node_with_key_removed = self.tree_delete(self.page_manager.page_get(kid_ptr), key);
@@ -167,7 +167,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
             MergeDirection::Left(sibling) => {
                 let merged = sibling.node_merge(updated_node);
                 self.page_manager.page_del(node_with_key.get_ptr(idx - 1));
-                let merged_first_key = merged.get_key(0);
+                let merged_first_key = merged.get_key(0).to_owned();
                 node_with_key.node_replace_2_kid(
                     idx - 1,
                     self.page_manager.page_new(merged),
@@ -177,7 +177,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
             MergeDirection::Right(sibling) => {
                 let merged = updated_node.node_merge(sibling);
                 self.page_manager.page_del(node_with_key.get_ptr(idx + 1));
-                let merged_first_key = merged.get_key(0);
+                let merged_first_key = merged.get_key(0).to_owned();
                 node_with_key.node_replace_2_kid(
                     idx,
                     self.page_manager.page_new(merged),
@@ -207,7 +207,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         idx: u16,
         new_children: Vec<BNode>,
     ) -> BNode {
-        // replace the kid node with the splited node
+        // replace the kid node with the split node
         let num_new = new_children.len() as u16;
         let old_num_keys = old_node.num_keys();
 
@@ -216,12 +216,12 @@ impl<'a, B: BTreePageManager> BTree<B> {
             BNode::new_with_size(NodeType::Node, old_num_keys - 1 + num_new, new_node_size);
         new_node.node_append_range(&old_node, 0, 0, idx);
         for (i, node) in new_children.into_iter().enumerate() {
-            let node_first_key = node.get_key(0);
+            let node_first_key = node.get_key(0).to_owned();
             new_node.node_append_kv(
                 idx + i as u16,
                 self.page_manager.page_new(node),
                 &node_first_key,
-                &vec![],
+                &[],
             )
         }
         new_node.node_append_range(&old_node, idx + num_new, idx + 1, old_num_keys - (idx + 1));
@@ -260,7 +260,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         MergeDirection::None
     }
 
-    pub fn delete(&mut self, key: &Vec<u8>) -> bool {
+    pub fn delete(&mut self, key: &[u8]) -> bool {
         assert!(!key.is_empty());
         assert!(key.len() <= BTREE_MAX_KEY_SIZE);
 
@@ -285,8 +285,8 @@ impl<'a, B: BTreePageManager> BTree<B> {
         true
     }
 
-    pub fn insert(&mut self, key: Vec<u8>, val: Vec<u8>) -> bool {
-        let request = InsertRequest::new(key, val);
+    pub fn insert(&mut self, key: &[u8], val: &[u8]) -> bool {
+        let request = InsertRequest::new(key.to_vec(), val.to_vec());
         let response = self.insert_exec(request);
         response.added
     }
@@ -299,7 +299,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         if self.root == 0 {
             let mut root = BNode::new(NodeType::Leaf, 2);
 
-            root.node_append_kv(0, 0, &vec![], &vec![]);
+            root.node_append_kv(0, 0, &[], &[]);
             root.node_append_kv(1, 0, &request.key, &request.val);
             self.root = self.page_manager.page_new(root);
 
@@ -322,9 +322,9 @@ impl<'a, B: BTreePageManager> BTree<B> {
             // the root was split, add a new level
             let mut root = BNode::new(NodeType::Node, n_split);
             for (i, k_node) in splitted.into_iter().enumerate() {
-                let key = k_node.get_key(0);
+                let key = k_node.get_key(0).to_owned();
                 let ptr = self.page_manager.page_new(k_node);
-                root.node_append_kv(i as u16, ptr, &key, &vec![]);
+                root.node_append_kv(i as u16, ptr, &key, &[]);
             }
             self.root = self.page_manager.page_new(root);
         } else {
@@ -334,7 +334,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         request
     }
 
-    pub fn get_value(&self, key: &Vec<u8>) -> Option<Vec<u8>> {
+    pub fn get_value(&self, key: &[u8]) -> Option<Vec<u8>> {
         assert!(!key.is_empty());
         assert!(key.len() <= BTREE_MAX_KEY_SIZE);
 
@@ -347,7 +347,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
             let idx = node.node_lookup_le(key);
             match node.b_type() {
                 NodeType::Leaf => match node.get_key(idx).cmp(key) {
-                    Ordering::Equal => return Some(node.get_val(idx)),
+                    Ordering::Equal => return Some(node.get_val(idx).to_vec()),
                     _ => return None,
                 },
                 NodeType::Node => {
@@ -358,7 +358,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         }
     }
 
-    fn seek_le(&'a mut self, key: &Vec<u8>) -> BTreeIterator<'a, B> {
+    fn seek_le(&'a mut self, key: &[u8]) -> BTreeIterator<'a, B> {
         let mut path = Vec::new();
         let mut positions = Vec::new();
 
@@ -379,7 +379,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         BTreeIterator::new(self, path, positions)
     }
 
-    pub fn seek(&'a mut self, key: &Vec<u8>, compare: CmpOption) -> BTreeIterator<'a, B> {
+    pub fn seek(&'a mut self, key: &[u8], compare: CmpOption) -> BTreeIterator<'a, B> {
         let mut iter = self.seek_le(key);
         if let CmpOption::LE = compare {
         } else {
@@ -396,7 +396,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         iter
     }
 
-    fn cmp_ok(key: &Vec<u8>, compare: &CmpOption, reference: &Vec<u8>) -> bool {
+    fn cmp_ok(key: &[u8], compare: &CmpOption, reference: &[u8]) -> bool {
         match compare {
             CmpOption::GT => key > reference,
             CmpOption::GE => key >= reference,
@@ -476,18 +476,17 @@ mod tests {
         }
 
         fn add(&mut self, key: &str, val: &str) {
-            self.tree
-                .insert(key.as_bytes().to_vec(), val.as_bytes().to_vec());
+            self.tree.insert(key.as_bytes(), val.as_bytes());
             self.reference.insert(key.to_string(), val.to_string());
         }
 
         fn get(&self, key: &str) -> Option<Vec<u8>> {
-            self.tree.get_value(&key.as_bytes().to_vec())
+            self.tree.get_value(key.as_bytes())
         }
 
         fn delete(&mut self, key: &str) -> bool {
             let remove = self.reference.remove(key);
-            let did_remove = self.tree.delete(&key.as_bytes().to_vec());
+            let did_remove = self.tree.delete(key.as_bytes());
             assert_eq!(remove.is_some(), did_remove);
             did_remove
         }
@@ -508,9 +507,9 @@ mod tests {
                 }
                 NodeType::Leaf => {
                     for i in 0..n_keys {
-                        let key = node.get_key(i).clone();
-                        keys.push(String::from_utf8(key).unwrap());
-                        vals.push(String::from_utf8(node.get_val(i).clone()).unwrap());
+                        let key = node.get_key(i);
+                        keys.push(String::from_utf8(key.to_vec()).unwrap());
+                        vals.push(String::from_utf8(node.get_val(i).to_vec()).unwrap());
                     }
                 }
             };
@@ -810,7 +809,7 @@ mod tests {
         c.add("key5", "val5");
 
         // Test seek_le with existing key
-        let mut iter = c.tree.seek_le(&"key3".as_bytes().to_vec());
+        let mut iter = c.tree.seek_le("key3".as_bytes());
         assert_eq!(
             iter.deref(),
             ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
@@ -837,7 +836,7 @@ mod tests {
         c.add("key5", "val5");
 
         // Test seek_le with existing key
-        let mut iter = c.tree.seek_le(&"key3".as_bytes().to_vec());
+        let mut iter = c.tree.seek_le("key3".as_bytes());
         assert_eq!(
             iter.deref(),
             ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
@@ -862,7 +861,7 @@ mod tests {
             c.add(&format!("key{}", i), &format!("val{}", i));
         }
 
-        let mut orderedItems = (1..=100)
+        let mut ordered_items = (1..=100)
             .map(|i| {
                 (
                     format!("key{}", i).as_bytes().to_vec(),
@@ -870,15 +869,15 @@ mod tests {
                 )
             })
             .collect::<Vec<(Vec<u8>, Vec<u8>)>>();
-        orderedItems.sort();
+        ordered_items.sort();
 
         // Test seek_le with existing key
-        let mut iter = c.tree.seek_le(&"key50".as_bytes().to_vec());
+        let mut iter = c.tree.seek_le("key50".as_bytes());
 
-        let index = orderedItems
+        let index = ordered_items
             .iter()
             .position(|(key, _)| key == &"key51".as_bytes().to_vec());
-        for (expected_key, expected_value) in orderedItems.iter().skip(index.unwrap()) {
+        for (expected_key, expected_value) in ordered_items.iter().skip(index.unwrap()) {
             assert!(iter.next());
             let (key, value) = iter.deref();
             assert_eq!(expected_key, &key);
@@ -925,7 +924,7 @@ mod tests {
         c.add("key5", "val5");
 
         // Test seek_le with key larger than any key in the tree
-        let mut iter = c.tree.seek_le(&"key6".as_bytes().to_vec());
+        let mut iter = c.tree.seek_le("key6".as_bytes());
         assert_eq!(
             iter.deref(),
             ("key5".as_bytes().to_vec(), "val5".as_bytes().to_vec())
@@ -943,28 +942,28 @@ mod tests {
         c.add("key5", "val5");
 
         // GE
-        let iter = c.tree.seek(&"key3".as_bytes().to_vec(), CmpOption::GE);
+        let iter = c.tree.seek("key3".as_bytes(), CmpOption::GE);
         assert_eq!(
             iter.deref(),
             ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
         );
 
         // GT
-        let iter = c.tree.seek(&"key3".as_bytes().to_vec(), CmpOption::GT);
+        let iter = c.tree.seek("key3".as_bytes(), CmpOption::GT);
         assert_eq!(
             iter.deref(),
             ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
         );
 
         // LE
-        let iter = c.tree.seek(&"key3".as_bytes().to_vec(), CmpOption::LE);
+        let iter = c.tree.seek("key3".as_bytes(), CmpOption::LE);
         assert_eq!(
             iter.deref(),
             ("key3".as_bytes().to_vec(), "val3".as_bytes().to_vec())
         );
 
         // LT
-        let iter = c.tree.seek(&"key3".as_bytes().to_vec(), CmpOption::LT);
+        let iter = c.tree.seek("key3".as_bytes(), CmpOption::LT);
         assert_eq!(
             iter.deref(),
             ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
@@ -980,28 +979,28 @@ mod tests {
         c.add("key5", "val5");
 
         // GE
-        let iter = c.tree.seek(&"key3".as_bytes().to_vec(), CmpOption::GE);
+        let iter = c.tree.seek("key3".as_bytes(), CmpOption::GE);
         assert_eq!(
             iter.deref(),
             ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
         );
 
         // GT
-        let iter = c.tree.seek(&"key3".as_bytes().to_vec(), CmpOption::GT);
+        let iter = c.tree.seek("key3".as_bytes(), CmpOption::GT);
         assert_eq!(
             iter.deref(),
             ("key4".as_bytes().to_vec(), "val4".as_bytes().to_vec())
         );
 
         // LE
-        let iter = c.tree.seek(&"key3".as_bytes().to_vec(), CmpOption::LE);
+        let iter = c.tree.seek("key3".as_bytes(), CmpOption::LE);
         assert_eq!(
             iter.deref(),
             ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())
         );
 
         // LT
-        let iter = c.tree.seek(&"key3".as_bytes().to_vec(), CmpOption::LT);
+        let iter = c.tree.seek("key3".as_bytes(), CmpOption::LT);
         assert_eq!(
             iter.deref(),
             ("key2".as_bytes().to_vec(), "val2".as_bytes().to_vec())

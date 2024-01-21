@@ -47,7 +47,7 @@ pub struct DB {
 }
 
 impl DB {
-    pub fn get(&mut self, table: &String, record: &mut Record) -> io::Result<bool> {
+    pub fn get(&mut self, table: &str, record: &mut Record) -> io::Result<bool> {
         match self.get_table_def(table) {
             Some(table_def) => self.db_get(&table_def, record),
             None => Err(Error::new(
@@ -99,11 +99,11 @@ impl DB {
         );
 
         let value = DB::encode_values(None, &values[table_def.primary_keys..]);
-        self.kv.update(key, value, mode)
+        self.kv.update(&key, &value, mode)
     }
 
-    fn set(&mut self, table: String, record: Record, mode: InsertMode) -> io::Result<bool> {
-        match self.get_table_def(&table) {
+    fn set(&mut self, table: &str, record: Record, mode: InsertMode) -> io::Result<bool> {
+        match self.get_table_def(table) {
             Some(table_def) => self.db_update(&table_def, &record, mode),
             None => Err(Error::new(
                 ErrorKind::Other,
@@ -112,15 +112,15 @@ impl DB {
         }
     }
 
-    pub fn insert(&mut self, table: String, record: Record) -> io::Result<bool> {
+    pub fn insert(&mut self, table: &str, record: Record) -> io::Result<bool> {
         self.set(table, record, InsertMode::InsertOnly)
     }
 
-    pub fn update(&mut self, table: String, record: Record) -> io::Result<bool> {
+    pub fn update(&mut self, table: &str, record: Record) -> io::Result<bool> {
         self.set(table, record, InsertMode::UpdateOnly)
     }
 
-    pub fn upsert(&mut self, table: String, record: Record) -> io::Result<bool> {
+    pub fn upsert(&mut self, table: &str, record: Record) -> io::Result<bool> {
         self.set(table, record, InsertMode::Upsert)
     }
 
@@ -136,8 +136,8 @@ impl DB {
         self.kv.del(&key)
     }
 
-    pub fn delete(&mut self, table: String, record: Record) -> io::Result<bool> {
-        match self.get_table_def(&table) {
+    pub fn delete(&mut self, table: &str, record: Record) -> io::Result<bool> {
+        match self.get_table_def(table) {
             Some(table_def) => self.db_delete(&table_def, record),
             None => Err(Error::new(
                 ErrorKind::Other,
@@ -201,7 +201,7 @@ impl DB {
     }
 
     /** Checks if the table definition is loaded in the DB, if it is not in memory then it trys to pull the table from storage  */
-    fn get_table_def(&mut self, table: &String) -> Option<TableDef> {
+    fn get_table_def(&mut self, table: &str) -> Option<TableDef> {
         // Expose internal tables
         if INTERNAL_TABLES.contains_key(table) {
             return Some(INTERNAL_TABLES.get(table).unwrap().clone());
@@ -212,7 +212,7 @@ impl DB {
                 let table_def = self.get_table_def_db(table);
                 if table_def.is_some() {
                     self.tables
-                        .insert(table.clone(), table_def.clone().unwrap());
+                        .insert(table.to_string(), table_def.clone().unwrap());
                 }
                 table_def
             }
@@ -220,7 +220,7 @@ impl DB {
         }
     }
 
-    fn get_table_def_db(&self, table: &String) -> Option<TableDef> {
+    fn get_table_def_db(&self, table: &str) -> Option<TableDef> {
         let mut record = Record::new();
         record.add_bytes("name".to_string(), table.as_bytes().to_vec());
 
@@ -230,11 +230,7 @@ impl DB {
         }
 
         Some(TableDef::from_json(
-            record
-                .get(&"def".to_string())
-                .unwrap()
-                .bytes_to_string()
-                .unwrap(),
+            record.get("def").unwrap().bytes_to_string().unwrap(),
         ))
     }
 
@@ -262,7 +258,7 @@ impl DB {
 
         let ok = self.db_get(&TABLE_DEF_META, &mut meta)?;
         if ok {
-            if let Value::Bytes(value) = meta.get(&"val".to_string()).unwrap() {
+            if let Value::Bytes(value) = meta.get("val").unwrap() {
                 table_def.prefix = LittleEndian::read_u32(value.as_ref().unwrap());
             } else {
                 return Err(Error::new(ErrorKind::Other, "bad meta `val`".to_string()));
@@ -335,7 +331,7 @@ mod tests {
             assert!(result.is_ok());
         }
 
-        fn find_ref(&self, table: &String, record: &Record) -> Option<usize> {
+        fn find_ref(&self, table: &str, record: &Record) -> Option<usize> {
             let pkeys = self.db.tables[table].primary_keys;
             let empty = vec![];
             let records = self.reference.get(table).unwrap_or(&empty);
@@ -349,27 +345,27 @@ mod tests {
             found
         }
 
-        fn add(&mut self, table: String, record: Record) -> bool {
-            let added = self.db.upsert(table.clone(), record.clone());
+        fn add(&mut self, table: &str, record: Record) -> bool {
+            let added = self.db.upsert(table, record.clone());
             assert!(added.is_ok());
             let added = added.unwrap();
 
-            let idx = self.find_ref(&table, &record);
+            let idx = self.find_ref(table, &record);
             if !added {
                 assert!(idx.is_some());
-                self.reference.get_mut(&table).unwrap()[idx.unwrap()] = record;
+                self.reference.get_mut(table).unwrap()[idx.unwrap()] = record;
             } else {
                 assert!(idx.is_none());
-                if !self.reference.contains_key(&table) {
-                    self.reference.insert(table.clone(), vec![]);
+                if !self.reference.contains_key(table) {
+                    self.reference.insert(table.to_string(), vec![]);
                 }
-                self.reference.get_mut(&table).unwrap().push(record);
+                self.reference.get_mut(table).unwrap().push(record);
             };
 
             added
         }
 
-        fn get(&mut self, table: &String, record: &mut Record) -> bool {
+        fn get(&mut self, table: &str, record: &mut Record) -> bool {
             let ok = self.db.get(table, record);
             assert!(ok.is_ok());
             let ok = ok.unwrap();
@@ -385,15 +381,15 @@ mod tests {
             ok
         }
 
-        fn del(&mut self, table: String, record: Record) -> bool {
-            let deleted = self.db.delete(table.clone(), record.clone());
+        fn del(&mut self, table: &str, record: Record) -> bool {
+            let deleted = self.db.delete(table, record.clone());
             assert!(deleted.is_ok());
             let deleted = deleted.unwrap();
 
-            let idx = self.find_ref(&table, &record);
+            let idx = self.find_ref(table, &record);
             if deleted {
                 assert!(idx.is_some());
-                let records = self.reference.get_mut(&table).unwrap();
+                let records = self.reference.get_mut(table).unwrap();
                 records.remove(idx.unwrap());
             } else {
                 assert!(idx.is_none());
@@ -445,18 +441,10 @@ mod tests {
         assert!(ok.is_ok());
         assert!(ok.unwrap());
         assert_eq!(
-            meta.get(&"key".to_string())
-                .unwrap()
-                .bytes_to_string()
-                .unwrap(),
+            meta.get("key").unwrap().bytes_to_string().unwrap(),
             "test_key".to_string()
         );
-        assert!(meta
-            .get(&"val".to_string())
-            .unwrap()
-            .bytes()
-            .cmp(&vec![5; 4])
-            .is_eq());
+        assert!(meta.get("val").unwrap().bytes().cmp(&vec![5; 4]).is_eq());
     }
 
     #[test]
@@ -499,28 +487,19 @@ mod tests {
         {
             let mut rec = Record::new();
             rec.add_bytes("key".to_string(), "next_prefix".as_bytes().to_vec());
-            let ok = r.db.get(&"@meta".to_string(), &mut rec).unwrap();
+            let ok = r.db.get("@meta", &mut rec).unwrap();
             assert!(ok);
             let mut correct_next_prefix = vec![0; 4];
             LittleEndian::write_u32(&mut correct_next_prefix, 102);
-            assert_eq!(
-                rec.get(&"val".to_string()).unwrap().bytes(),
-                &correct_next_prefix
-            );
+            assert_eq!(rec.get("val").unwrap().bytes(), &correct_next_prefix);
         }
         {
             let mut rec = Record::new();
             rec.add_bytes("name".to_string(), "tbl_test".as_bytes().to_vec());
-            let ok = r.db.get(&"@table".to_string(), &mut rec).unwrap();
+            let ok = r.db.get("@table", &mut rec).unwrap();
             assert!(ok);
             let expected = r#"{"name":"tbl_test","types":[2,1,1,2],"columns":["ki1","ks2","s1","i2"],"primary_keys":2,"prefix":100}"#;
-            assert_eq!(
-                rec.get(&"def".to_string())
-                    .unwrap()
-                    .bytes_to_string()
-                    .unwrap(),
-                expected
-            );
+            assert_eq!(rec.get("def").unwrap().bytes_to_string().unwrap(), expected);
         }
     }
 
@@ -547,49 +526,39 @@ mod tests {
             .add_bytes("ks2".to_string(), "hello".as_bytes().to_vec());
         rec.add_bytes("s1".to_string(), "world".as_bytes().to_vec())
             .add_int64("i2".to_string(), 2);
-        let added = r.add("tbl_test".to_string(), rec.clone());
+        let added = r.add("tbl_test", rec.clone());
         assert!(added);
 
         {
             let mut rec = Record::new();
             rec.add_int64("ki1".to_string(), 1)
                 .add_bytes("ks2".to_string(), "hello".as_bytes().to_vec());
-            let ok = r.get(&"tbl_test".to_string(), &mut rec);
+            let ok = r.get("tbl_test", &mut rec);
             assert!(ok);
             assert_eq!(
-                rec.get(&"s1".to_string())
-                    .unwrap()
-                    .bytes_to_string()
-                    .unwrap(),
+                rec.get("s1").unwrap().bytes_to_string().unwrap(),
                 "world".to_string()
             );
-            assert_eq!(
-                rec.get(&"i2".to_string())
-                    .unwrap()
-                    .get_int64()
-                    .unwrap()
-                    .unwrap(),
-                2
-            );
+            assert_eq!(rec.get("i2").unwrap().get_int64().unwrap().unwrap(), 2);
         }
 
         {
             let mut rec = Record::new();
             rec.add_int64("ki1".to_string(), 1)
                 .add_bytes("ks2".to_string(), "hello2".as_bytes().to_vec());
-            let ok = r.get(&"tbl_test".to_string(), &mut rec);
+            let ok = r.get("tbl_test", &mut rec);
             assert!(!ok);
         }
 
         rec.set_bytes("s1".to_string(), "www".as_bytes().to_vec());
-        let added = r.add("tbl_test".to_string(), rec.clone());
+        let added = r.add("tbl_test", rec.clone());
         assert!(!added);
 
         {
             let mut rec = Record::new();
             rec.add_int64("ki1".to_string(), 1)
                 .add_bytes("ks2".to_string(), "hello".as_bytes().to_vec());
-            let ok = r.get(&"tbl_test".to_string(), &mut rec);
+            let ok = r.get("tbl_test", &mut rec);
             assert!(ok);
         }
 
@@ -597,11 +566,11 @@ mod tests {
             let mut key = Record::new();
             key.add_int64("ki1".to_string(), 1)
                 .add_bytes("ks2".to_string(), "hello2".as_bytes().to_vec());
-            let deleted = r.del("tbl_test".to_string(), key.clone());
+            let deleted = r.del("tbl_test", key.clone());
             assert!(!deleted);
 
             key.set_bytes("ks2".to_string(), "hello".as_bytes().to_vec());
-            let deleted = r.del("tbl_test".to_string(), key);
+            let deleted = r.del("tbl_test", key);
             assert!(deleted);
         }
     }
