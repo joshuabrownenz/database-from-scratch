@@ -10,12 +10,12 @@ fn test_kv_store_integration() {
     // Test `set` and `get`
     kv.set("key1".as_bytes(), "value1".as_bytes()).unwrap();
     assert_eq!(
-        kv.get(&"key1".as_bytes().to_vec()).unwrap(),
+        kv.get("key1".as_bytes()).unwrap(),
         "value1".as_bytes().to_vec()
     );
 
     // Test `set` and `remove`
     kv.set("key2".as_bytes(), "value2".as_bytes()).unwrap();
-    kv.del(&"key2".as_bytes().to_vec()).unwrap();
-    assert!(kv.get(&"key2".as_bytes().to_vec()).is_none());
+    kv.del("key2".as_bytes()).unwrap();
+    assert!(kv.get("key2".as_bytes()).is_none());
 }

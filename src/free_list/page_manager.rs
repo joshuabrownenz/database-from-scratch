@@ -1,7 +1,8 @@
+use crate::prelude::*;
 use std::{
     collections::{HashMap, VecDeque},
     fs::File,
-    io::{self, Write},
+    io::Write,
 };
 
 use crate::{
@@ -24,7 +25,7 @@ pub struct PageManager {
 }
 
 impl PageManager {
-    pub fn new(file_pointer: File) -> io::Result<Self> {
+    pub fn new(file_pointer: File) -> Result<Self> {
         Ok(Self {
             mmap: MMap::new(&file_pointer)?,
             file_pointer,
@@ -34,13 +35,13 @@ impl PageManager {
         })
     }
 
-    pub fn master_load(&mut self) -> io::Result<MasterPage> {
+    pub fn master_load(&mut self) -> Result<MasterPage> {
         let master_page = MasterPage::master_load(&self.mmap)?;
         self.flushed = master_page.total_used_pages;
         Ok(master_page)
     }
 
-    pub fn set_master_page(&mut self, btree_root: u64, free_list_head: u64) -> io::Result<()> {
+    pub fn set_master_page(&mut self, btree_root: u64, free_list_head: u64) -> Result<()> {
         let master_page = MasterPage::new(btree_root, self.flushed, free_list_head);
         master_page.master_save(&mut self.file_pointer)
     }
@@ -88,7 +89,7 @@ impl PageManager {
         freed_ptrs
     }
 
-    pub fn write_pages(&mut self) -> io::Result<()> {
+    pub fn write_pages(&mut self) -> Result<()> {
         self.extend_file()?;
         self.extend_mmap()?;
 
@@ -102,7 +103,7 @@ impl PageManager {
         Ok(())
     }
 
-    pub fn flush(&mut self) -> io::Result<()> {
+    pub fn flush(&mut self) -> Result<()> {
         // Flush data to the disk. Must be done before updating the master page.
         self.file_pointer.flush()?;
 
@@ -113,7 +114,7 @@ impl PageManager {
         Ok(())
     }
 
-    pub fn extend_file(&mut self) -> io::Result<()> {
+    pub fn extend_file(&mut self) -> Result<()> {
         let npages = self.flushed + self.nappend as u64;
         let mut file_pages = self.mmap.file / BTREE_PAGE_SIZE as u64;
         if file_pages >= npages {
@@ -133,17 +134,17 @@ impl PageManager {
         let file_size = file_pages * BTREE_PAGE_SIZE as u64;
         let result = self.file_pointer.set_len(file_size);
         if result.is_err() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("failed to extend file: {:?}", result.unwrap_err()),
-            ));
+            return Err(Error::Generic(format!(
+                "failed to extend file: {:?}",
+                result.unwrap_err()
+            )));
         }
 
         self.mmap.file = file_size;
         Ok(())
     }
 
-    pub fn extend_mmap(&mut self) -> io::Result<()> {
+    pub fn extend_mmap(&mut self) -> Result<()> {
         let npages = self.flushed + self.nappend as u64;
         self.mmap.extend_mmap(&self.file_pointer, npages as usize)
     }

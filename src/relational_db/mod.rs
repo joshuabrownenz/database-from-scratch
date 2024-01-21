@@ -1,8 +1,6 @@
-use std::{
-    collections::HashMap,
-    io::{self, Error, ErrorKind},
-};
+use std::collections::HashMap;
 
+use crate::prelude::*;
 use crate::{b_tree::InsertMode, kv_store::KV};
 
 pub mod records;
@@ -47,19 +45,16 @@ pub struct DB {
 }
 
 impl DB {
-    pub fn get(&mut self, table: &str, record: &mut Record) -> io::Result<bool> {
+    pub fn get(&mut self, table: &str, record: &mut Record) -> Result<bool> {
         match self.get_table_def(table) {
             Some(table_def) => self.db_get(&table_def, record),
-            None => Err(Error::new(
-                ErrorKind::Other,
-                format!("Table not found {}", table),
-            )),
+            None => Err(Error::Generic(format!("Table not found {}", table))),
         }
     }
 
     /// Retrieve value from kv store itself
     /// TODO: Don't return bool, return Record (make Record immutable)
-    fn db_get(&self, table_def: &TableDef, record: &mut Record) -> io::Result<bool> {
+    fn db_get(&self, table_def: &TableDef, record: &mut Record) -> Result<bool> {
         let mut values: Vec<Value> = table_def.check_record(record, table_def.primary_keys)?;
 
         let key: Vec<u8> =
@@ -89,7 +84,7 @@ impl DB {
         table_def: &TableDef,
         record: &Record,
         mode: InsertMode,
-    ) -> io::Result<bool> {
+    ) -> Result<bool> {
         let values: Vec<Value> = table_def.check_record(record, table_def.columns.len())?;
 
         let key = DB::encode_key(
@@ -102,29 +97,26 @@ impl DB {
         self.kv.update(&key, &value, mode)
     }
 
-    fn set(&mut self, table: &str, record: Record, mode: InsertMode) -> io::Result<bool> {
+    fn set(&mut self, table: &str, record: Record, mode: InsertMode) -> Result<bool> {
         match self.get_table_def(table) {
             Some(table_def) => self.db_update(&table_def, &record, mode),
-            None => Err(Error::new(
-                ErrorKind::Other,
-                format!("Table not found {}", table),
-            )),
+            None => Err(Error::Generic(format!("Table not found {}", table))),
         }
     }
 
-    pub fn insert(&mut self, table: &str, record: Record) -> io::Result<bool> {
+    pub fn insert(&mut self, table: &str, record: Record) -> Result<bool> {
         self.set(table, record, InsertMode::InsertOnly)
     }
 
-    pub fn update(&mut self, table: &str, record: Record) -> io::Result<bool> {
+    pub fn update(&mut self, table: &str, record: Record) -> Result<bool> {
         self.set(table, record, InsertMode::UpdateOnly)
     }
 
-    pub fn upsert(&mut self, table: &str, record: Record) -> io::Result<bool> {
+    pub fn upsert(&mut self, table: &str, record: Record) -> Result<bool> {
         self.set(table, record, InsertMode::Upsert)
     }
 
-    fn db_delete(&mut self, table_def: &TableDef, record: Record) -> io::Result<bool> {
+    fn db_delete(&mut self, table_def: &TableDef, record: Record) -> Result<bool> {
         let values: Vec<Value> = table_def.check_record(&record, table_def.primary_keys)?;
 
         let key = DB::encode_key(
@@ -136,13 +128,10 @@ impl DB {
         self.kv.del(&key)
     }
 
-    pub fn delete(&mut self, table: &str, record: Record) -> io::Result<bool> {
+    pub fn delete(&mut self, table: &str, record: Record) -> Result<bool> {
         match self.get_table_def(table) {
             Some(table_def) => self.db_delete(&table_def, record),
-            None => Err(Error::new(
-                ErrorKind::Other,
-                format!("Table not found {}", table),
-            )),
+            None => Err(Error::Generic(format!("Table not found {}", table))),
         }
     }
 
@@ -235,7 +224,7 @@ impl DB {
     }
 
     /** Adds a new table to the DB */
-    pub fn table_new(&mut self, mut table_def: TableDef) -> io::Result<()> {
+    pub fn table_new(&mut self, mut table_def: TableDef) -> Result<()> {
         table_def.check()?;
 
         // check the existing table
@@ -244,10 +233,7 @@ impl DB {
 
         let table_exists = self.db_get(&TABLE_DEF_TABLE, &mut table)?;
         if table_exists {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("table exists: {}", table_def.name),
-            ));
+            return Err(Error::Generic(format!("table exists: {}", table_def.name)));
         }
 
         // allocate the next prefix
@@ -261,7 +247,7 @@ impl DB {
             if let Value::Bytes(value) = meta.get("val").unwrap() {
                 table_def.prefix = LittleEndian::read_u32(value.as_ref().unwrap());
             } else {
-                return Err(Error::new(ErrorKind::Other, "bad meta `val`".to_string()));
+                return Err(Error::Static("bad meta `val`"));
             };
 
             assert!(table_def.prefix > TABLE_PREFIX_MIN);
@@ -276,15 +262,7 @@ impl DB {
         self.db_update(&TABLE_DEF_META, &meta, InsertMode::Upsert)?;
 
         // Store the definition
-        let definition = match table_def.to_json() {
-            Ok(json) => json,
-            Err(err) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    err.to_string(),
-                ))
-            }
-        };
+        let definition = table_def.to_json()?;
 
         table.add_bytes("def".to_string(), definition.as_bytes().to_vec());
         self.db_update(&TABLE_DEF_TABLE, &table, InsertMode::Upsert)?;
