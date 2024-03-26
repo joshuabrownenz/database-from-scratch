@@ -1,16 +1,18 @@
 use std::collections::HashMap;
 
+use crate::b_tree::CmpOption;
 use crate::prelude::*;
 use crate::{b_tree::InsertMode, kv_store::KV};
 
 pub mod records;
+pub mod scanner;
 pub mod tables;
 pub mod value;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use records::Record;
 
-use self::{tables::TableDef, value::Value};
+use self::{scanner::Scanner, tables::TableDef, value::Value};
 
 lazy_static! {
     pub static ref TABLE_DEF_META: TableDef = TableDef {
@@ -266,6 +268,40 @@ impl DB {
 
         table.add_bytes("def".to_string(), definition.as_bytes().to_vec());
         self.db_update(&TABLE_DEF_TABLE, &table, InsertMode::Upsert)?;
+
+        Ok(())
+    }
+
+    pub fn scan(&mut self, table: &str, mut scanner: Scanner) -> Result<()> {
+        let table_def = self.get_table_def(table);
+        if table_def.is_none() {
+            return Err(Error::Generic(format!("Table not found {}", table)));
+        }
+        let table_def = table_def.unwrap();
+
+        self.db_scan(table_def, &mut scanner)
+    }
+
+    fn db_scan<'a>(&'a mut self, table_def: TableDef, scanner: &'a mut Scanner) -> Result<()> {
+        // Sanity checks
+        let cmp1_is_lt = matches!(scanner.compare_1, CmpOption::LE | CmpOption::LT);
+        let cmp2_is_lt = matches!(scanner.compare_2, CmpOption::LE | CmpOption::LT);
+
+        if cmp1_is_lt && cmp2_is_lt || !cmp1_is_lt && !cmp2_is_lt {
+            return Err(Error::Static("Bad range"));
+        };
+
+        let values_1 = table_def.check_record(&scanner.key_1, table_def.columns.len())?;
+        let values_2 = table_def.check_record(&scanner.key_2, table_def.columns.len())?;
+
+        let key_start = DB::encode_key(None, table_def.prefix, &values_1[..table_def.primary_keys]);
+        let key_end = DB::encode_key(None, table_def.prefix, &values_2[..table_def.primary_keys]);
+
+        scanner.set_table_def(table_def);
+        scanner.set_key_end(key_end);
+
+        let mut iter = self.kv.seek(&key_start, scanner.compare_1);
+        scanner.set_iter(&mut iter);
 
         Ok(())
     }

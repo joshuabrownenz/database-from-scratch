@@ -2,6 +2,8 @@ use std::fs::OpenOptions;
 
 extern crate byteorder;
 
+use crate::b_tree::btree_iter::BTreeIterator;
+use crate::b_tree::CmpOption;
 use crate::prelude::*;
 use crate::{
     b_tree::{BTree, InsertMode, InsertRequest},
@@ -13,7 +15,7 @@ pub struct KV {
 }
 
 impl KV {
-    /** Opens the database. Callers responsiblity to close even if open results in an error */
+    /** Opens the database. Callers responsibility to close even if open results in an error */
     pub fn open(path: String) -> Result<KV> {
         // Open or create the file
         let file_open = OpenOptions::new()
@@ -79,6 +81,10 @@ impl KV {
         let res = self.tree.insert_exec(req);
         self.flush_pages()?;
         Ok(res.added)
+    }
+
+    pub fn seek<'a>(&'a mut self, key: &[u8], compare: CmpOption) -> BTreeIterator<'a, FreeList> {
+        self.tree.seek(key, compare)
     }
 }
 

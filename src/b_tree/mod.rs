@@ -13,6 +13,7 @@ enum MergeDirection {
     None,
 }
 
+#[derive(Copy, Clone)]
 pub enum CmpOption {
     GT,
     GE,
@@ -64,7 +65,7 @@ pub struct BTree<B: BTreePageManager> {
     pub page_manager: B,
 }
 
-impl<'a, B: BTreePageManager> BTree<B> {
+impl<B: BTreePageManager> BTree<B> {
     pub fn new(page_manager: B) -> BTree<B> {
         BTree {
             root: 0,
@@ -358,7 +359,7 @@ impl<'a, B: BTreePageManager> BTree<B> {
         }
     }
 
-    fn seek_le(&'a mut self, key: &[u8]) -> BTreeIterator<'a, B> {
+    fn seek_le<'a>(&'a mut self, key: &[u8]) -> BTreeIterator<'a, B> {
         let mut path = Vec::new();
         let mut positions = Vec::new();
 
@@ -379,8 +380,8 @@ impl<'a, B: BTreePageManager> BTree<B> {
         BTreeIterator::new(self, path, positions)
     }
 
-    pub fn seek(&'a mut self, key: &[u8], compare: CmpOption) -> BTreeIterator<'a, B> {
-        let mut iter = self.seek_le(key);
+    pub fn seek<'a>(&'a mut self, key: &[u8], compare: CmpOption) -> BTreeIterator<'a, B> {
+        let mut iter: BTreeIterator<'_, B> = self.seek_le(key);
         if let CmpOption::LE = compare {
         } else {
             let (current_key, _) = iter.deref();
