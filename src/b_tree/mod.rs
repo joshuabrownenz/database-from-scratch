@@ -1,7 +1,7 @@
 pub mod b_node;
 pub mod btree_iter;
 
-use crate::free_list::{cloneable::CloneableBTreePageManager, master_page::MasterPage};
+use crate::free_list::cloneable::CloneableBTreePageManager;
 
 use self::{
     b_node::{BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER},

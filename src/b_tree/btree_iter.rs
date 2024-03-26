@@ -10,7 +10,7 @@ pub struct BTreeIterator<B: CloneableBTreePageManager> {
 
 type Item = (Vec<u8>, Vec<u8>);
 
-impl<'a, B: CloneableBTreePageManager> BTreeIterator<B> {
+impl<B: CloneableBTreePageManager> BTreeIterator<B> {
     pub fn new(tree: &BTree<B>, path: Vec<BNode>, positions: Vec<u16>) -> BTreeIterator<B> {
         BTreeIterator {
             tree: tree.clone(),
@@ -29,18 +29,18 @@ impl<'a, B: CloneableBTreePageManager> BTreeIterator<B> {
 
     /** Moves forward along the iterator */
     pub fn next(&mut self) -> bool {
-        self.nextIter(self.positions.len() - 1)
+        self.next_iter(self.positions.len() - 1)
     }
 
     /** Moves forward along the iterator, returns wether the move was a success or not */
-    fn nextIter(&mut self, level: usize) -> bool {
+    fn next_iter(&mut self, level: usize) -> bool {
         let node = &self.path[level];
         if self.positions[level] < node.num_keys() - 1 {
             // move within this node
             self.positions[level] += 1;
         } else if level > 0 {
             // move to a slibing node
-            if !self.nextIter(level - 1) {
+            if !self.next_iter(level - 1) {
                 //
                 return false;
             }
@@ -67,17 +67,17 @@ impl<'a, B: CloneableBTreePageManager> BTreeIterator<B> {
 
     /** Moves backward along the iterator */
     pub fn prev(&mut self) -> bool {
-        self.prevIter(self.positions.len() - 1)
+        self.prev_iter(self.positions.len() - 1)
     }
 
     /** Moves forward along the iterator, returns wether the move was a success or not */
-    fn prevIter(&mut self, level: usize) -> bool {
+    fn prev_iter(&mut self, level: usize) -> bool {
         if self.positions[level] > 0 {
             // move within this node
             self.positions[level] -= 1;
         } else if level > 0 {
             // move to a slibing node
-            if !self.prevIter(level - 1) {
+            if !self.prev_iter(level - 1) {
                 //
                 return false;
             }
