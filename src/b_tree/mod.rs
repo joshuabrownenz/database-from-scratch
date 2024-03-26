@@ -1,6 +1,8 @@
 pub mod b_node;
 pub mod btree_iter;
 
+use crate::free_list::{cloneable::CloneableBTreePageManager, master_page::MasterPage};
+
 use self::{
     b_node::{BNode, NodeType, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE, HEADER},
     btree_iter::BTreeIterator,
@@ -52,20 +54,21 @@ impl InsertRequest {
         self
     }
 }
-
 pub trait BTreePageManager {
     fn page_get(&self, ptr: u64) -> BNode;
     fn page_new(&mut self, node: BNode) -> u64;
     fn page_del(&mut self, ptr: u64);
+    // TODO: Figure out how to close files
 }
 
-pub struct BTree<B: BTreePageManager> {
+#[derive(Clone)]
+pub struct BTree<B: CloneableBTreePageManager> {
     // pointer (a nonzero page number)
     pub root: u64,
     pub page_manager: B,
 }
 
-impl<B: BTreePageManager> BTree<B> {
+impl<B: CloneableBTreePageManager> BTree<B> {
     pub fn new(page_manager: B) -> BTree<B> {
         BTree {
             root: 0,
@@ -359,7 +362,7 @@ impl<B: BTreePageManager> BTree<B> {
         }
     }
 
-    fn seek_le<'a>(&'a mut self, key: &[u8]) -> BTreeIterator<'a, B> {
+    fn seek_le(&self, key: &[u8]) -> BTreeIterator<B> {
         let mut path = Vec::new();
         let mut positions = Vec::new();
 
@@ -380,8 +383,8 @@ impl<B: BTreePageManager> BTree<B> {
         BTreeIterator::new(self, path, positions)
     }
 
-    pub fn seek<'a>(&'a mut self, key: &[u8], compare: CmpOption) -> BTreeIterator<'a, B> {
-        let mut iter: BTreeIterator<'_, B> = self.seek_le(key);
+    pub fn seek(&self, key: &[u8], compare: CmpOption) -> BTreeIterator<B> {
+        let mut iter: BTreeIterator<B> = self.seek_le(key);
         if let CmpOption::LE = compare {
         } else {
             let (current_key, _) = iter.deref();
@@ -410,6 +413,8 @@ impl<B: BTreePageManager> BTree<B> {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
+
+    use crate::free_list::cloneable::RcRWLockBTreePageManager;
 
     use super::*;
     extern crate rand;
@@ -463,12 +468,12 @@ mod tests {
     }
 
     struct C {
-        pub tree: BTree<PageManager>,
+        pub tree: BTree<RcRWLockBTreePageManager<PageManager>>,
         pub reference: HashMap<String, String>,
     }
     impl C {
         fn new() -> C {
-            let page_manager = PageManager::new();
+            let page_manager = RcRWLockBTreePageManager::new(PageManager::new());
 
             C {
                 tree: BTree::new(page_manager),
@@ -497,7 +502,7 @@ mod tests {
                 panic!("ptr can't be 0");
             }
 
-            let node = self.tree.page_manager.get_page(ptr);
+            let node = self.tree.page_manager.page_get(ptr);
             let n_keys = node.num_keys();
             match node.b_type() {
                 NodeType::Node => {
@@ -655,7 +660,10 @@ mod tests {
         c.verify();
 
         // The dummy empty key
-        assert_eq!(1, c.tree.page_manager.pages.len());
+        assert_eq!(
+            1,
+            c.tree.page_manager.page_manager.read().unwrap().pages.len()
+        );
         assert_eq!(1, c.tree.page_manager.page_get(c.tree.root).num_keys());
     }
 

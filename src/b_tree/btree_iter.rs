@@ -1,19 +1,19 @@
 use crate::b_tree::b_node::NodeType;
 
-use super::{b_node::BNode, BTree, BTreePageManager};
+use super::{b_node::BNode, BTree, CloneableBTreePageManager};
 
-pub struct BTreeIterator<'a, B: BTreePageManager> {
-    tree: &'a BTree<B>,
+pub struct BTreeIterator<B: CloneableBTreePageManager> {
+    tree: BTree<B>,
     path: Vec<BNode>,
     positions: Vec<u16>,
 }
 
 type Item = (Vec<u8>, Vec<u8>);
 
-impl<'a, B: BTreePageManager> BTreeIterator<'a, B> {
-    pub fn new(tree: &'a BTree<B>, path: Vec<BNode>, positions: Vec<u16>) -> BTreeIterator<'a, B> {
+impl<'a, B: CloneableBTreePageManager> BTreeIterator<B> {
+    pub fn new(tree: &BTree<B>, path: Vec<BNode>, positions: Vec<u16>) -> BTreeIterator<B> {
         BTreeIterator {
-            tree,
+            tree: tree.clone(),
             path,
             positions,
         }
@@ -107,7 +107,13 @@ impl<'a, B: BTreePageManager> BTreeIterator<'a, B> {
 mod tests {
     use std::{cmp::Ordering, collections::HashMap};
 
-    use crate::b_tree::b_node::{BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE};
+    use crate::{
+        b_tree::{
+            b_node::{BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE},
+            BTreePageManager,
+        },
+        free_list::cloneable::RcRWLockBTreePageManager,
+    };
 
     use super::*;
     extern crate rand;
@@ -125,7 +131,7 @@ mod tests {
             }
         }
 
-        fn get_page(&self, ptr: u64) -> BNode {
+        fn page_get(&self, ptr: u64) -> BNode {
             BNode::from(self.pages.get(&ptr).unwrap())
         }
 
@@ -151,7 +157,7 @@ mod tests {
         }
 
         fn page_get(&self, ptr: u64) -> BNode {
-            self.get_page(ptr)
+            self.page_get(ptr)
         }
 
         fn page_del(&mut self, ptr: u64) {
@@ -161,12 +167,12 @@ mod tests {
     // TODO use this struct in other test files
 
     struct C<B: BTreePageManager> {
-        pub tree: BTree<B>,
+        pub tree: BTree<RcRWLockBTreePageManager<B>>,
         pub reference: HashMap<String, String>,
     }
     impl C<PageManager> {
         fn new() -> C<PageManager> {
-            let page_manager = PageManager::new();
+            let page_manager = RcRWLockBTreePageManager::new(PageManager::new());
 
             C {
                 tree: BTree::new(page_manager),
@@ -207,8 +213,8 @@ mod tests {
         assert_eq!(c.get("e").unwrap(), "e".as_bytes().to_vec());
 
         let mut iter = BTreeIterator {
-            tree: &c.tree,
-            path: vec![c.tree.page_manager.get_page(c.tree.root)],
+            tree: c.tree.clone(),
+            path: vec![c.tree.page_manager.page_get(c.tree.root)],
             positions: vec![0],
         };
 
@@ -257,8 +263,8 @@ mod tests {
         assert_eq!(c.get("e").unwrap(), "e".as_bytes().to_vec());
 
         let mut iter = BTreeIterator {
-            tree: &c.tree,
-            path: vec![c.tree.page_manager.get_page(c.tree.root)],
+            tree: c.tree.clone(),
+            path: vec![c.tree.page_manager.page_get(c.tree.root)],
             positions: vec![5],
         };
 
@@ -307,9 +313,9 @@ mod tests {
         assert_eq!(c.get("e").unwrap(), "e".as_bytes().to_vec());
 
         let mut iter = BTreeIterator {
-            tree: &c.tree,
+            tree: c.tree.clone(),
 
-            path: vec![c.tree.page_manager.get_page(c.tree.root)],
+            path: vec![c.tree.page_manager.page_get(c.tree.root)],
             positions: vec![0],
         };
 
@@ -361,9 +367,9 @@ mod tests {
         c.delete("e");
 
         let mut iter = BTreeIterator {
-            tree: &c.tree,
+            tree: c.tree.clone(),
 
-            path: vec![c.tree.page_manager.get_page(c.tree.root)],
+            path: vec![c.tree.page_manager.page_get(c.tree.root)],
             positions: vec![0],
         };
 
@@ -405,16 +411,16 @@ mod tests {
             c.add(&key, &val);
         }
 
-        let mut path = vec![c.tree.page_manager.get_page(c.tree.root)];
+        let mut path = vec![c.tree.page_manager.page_get(c.tree.root)];
         let mut positions = vec![0];
         while path[path.len() - 1].b_type() == NodeType::Node {
             let new_node_ptr = path[path.len() - 1].get_ptr(positions[positions.len() - 1]);
-            let new_node = c.tree.page_manager.get_page(new_node_ptr);
+            let new_node = c.tree.page_manager.page_get(new_node_ptr);
             path.push(new_node);
             positions.push(0);
         }
         let mut iter = BTreeIterator {
-            tree: &c.tree,
+            tree: c.tree.clone(),
 
             path,
             positions,
@@ -442,17 +448,17 @@ mod tests {
             c.add(&key, &val);
         }
 
-        let root = c.tree.page_manager.get_page(c.tree.root);
+        let root = c.tree.page_manager.page_get(c.tree.root);
         let mut positions = vec![root.num_keys() - 1];
         let mut path = vec![root];
         while path[path.len() - 1].b_type() == NodeType::Node {
             let new_node_ptr = path[path.len() - 1].get_ptr(positions[positions.len() - 1]);
-            let new_node = c.tree.page_manager.get_page(new_node_ptr);
+            let new_node = c.tree.page_manager.page_get(new_node_ptr);
             positions.push(new_node.num_keys() - 1);
             path.push(new_node);
         }
         let mut iter = BTreeIterator {
-            tree: &c.tree,
+            tree: c.tree.clone(),
 
             path,
             positions,
@@ -492,16 +498,16 @@ mod tests {
             c.add(&key, &val);
         }
 
-        let mut path = vec![c.tree.page_manager.get_page(c.tree.root)];
+        let mut path = vec![c.tree.page_manager.page_get(c.tree.root)];
         let mut positions = vec![0];
         while path[path.len() - 1].b_type() == NodeType::Node {
             let new_node_ptr = path[path.len() - 1].get_ptr(positions[positions.len() - 1]);
-            let new_node = c.tree.page_manager.get_page(new_node_ptr);
+            let new_node = c.tree.page_manager.page_get(new_node_ptr);
             path.push(new_node);
             positions.push(0);
         }
         let mut iter = BTreeIterator {
-            tree: &c.tree,
+            tree: c.tree.clone(),
 
             path,
             positions,
@@ -541,17 +547,17 @@ mod tests {
             c.add(&key, &val);
         }
 
-        let root = c.tree.page_manager.get_page(c.tree.root);
+        let root = c.tree.page_manager.page_get(c.tree.root);
         let mut positions = vec![root.num_keys() - 1];
         let mut path = vec![root];
         while path[path.len() - 1].b_type() == NodeType::Node {
             let new_node_ptr = path[path.len() - 1].get_ptr(positions[positions.len() - 1]);
-            let new_node = c.tree.page_manager.get_page(new_node_ptr);
+            let new_node = c.tree.page_manager.page_get(new_node_ptr);
             positions.push(new_node.num_keys() - 1);
             path.push(new_node);
         }
         let mut iter = BTreeIterator {
-            tree: &c.tree,
+            tree: c.tree.clone(),
             path,
             positions,
         };

@@ -1,22 +1,22 @@
 use crate::{
     b_tree::{btree_iter::BTreeIterator, CmpOption},
-    free_list::FreeList,
+    free_list::{cloneable::RcRWLockBTreePageManager, FreeList},
 };
 
 use super::{records::Record, tables::TableDef};
 
-pub struct Scanner<'a> {
+pub struct Scanner {
     pub compare_1: CmpOption,
     pub compare_2: CmpOption,
     pub key_1: Record,
     pub key_2: Record,
     // Internal
     table_def: TableDef,
-    iter: Option<&'a mut BTreeIterator<'a, FreeList>>,
+    iter: Option<BTreeIterator<RcRWLockBTreePageManager<FreeList>>>,
     key_end: Vec<u8>,
 }
 
-impl<'a> Scanner<'a> {
+impl Scanner {
     pub fn valid(&self) -> bool {
         // self.iter.valid()
         panic!("Not implemented")
@@ -39,7 +39,7 @@ impl<'a> Scanner<'a> {
         self.key_end = key_end;
     }
 
-    pub fn set_iter(&'a mut self, iter: &'a mut BTreeIterator<'a, FreeList>) {
+    pub fn set_iter(&mut self, iter: BTreeIterator<RcRWLockBTreePageManager<FreeList>>) {
         self.iter = Some(iter);
     }
 }

@@ -1,5 +1,6 @@
+pub mod cloneable;
 pub mod fl_node;
-mod master_page;
+pub mod master_page;
 pub mod mmap;
 pub mod page_manager;
 use crate::prelude::*;
@@ -11,6 +12,7 @@ use crate::{
 
 use std::{collections::VecDeque, fs::File};
 
+use self::cloneable::RcRWLockBTreePageManager;
 use self::{fl_node::FLNode, master_page::MasterPage, page_manager::PageManager};
 pub struct FreeList {
     /// Pointer to first node of the free list
@@ -198,6 +200,16 @@ impl BTreePageManager for FreeList {
 
     fn page_del(&mut self, ptr: u64) {
         self.page_manager.page_del(ptr)
+    }
+}
+
+impl RcRWLockBTreePageManager<FreeList> {
+    pub fn master_load(&mut self) -> Result<MasterPage> {
+        self.page_manager.write().unwrap().master_load()
+    }
+
+    pub fn flush_pages(&mut self, btree_root: u64) -> Result<()> {
+        self.page_manager.write().unwrap().flush_pages(btree_root)
     }
 }
 

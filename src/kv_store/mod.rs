@@ -4,6 +4,7 @@ extern crate byteorder;
 
 use crate::b_tree::btree_iter::BTreeIterator;
 use crate::b_tree::CmpOption;
+use crate::free_list::cloneable::{CloneableBTreePageManager, RcRWLockBTreePageManager};
 use crate::prelude::*;
 use crate::{
     b_tree::{BTree, InsertMode, InsertRequest},
@@ -11,7 +12,7 @@ use crate::{
 };
 
 pub struct KV {
-    tree: BTree<FreeList>,
+    tree: BTree<RcRWLockBTreePageManager<FreeList>>,
 }
 
 impl KV {
@@ -36,7 +37,7 @@ impl KV {
         let free = FreeList::new(file_pointer)?;
 
         let mut kv = KV {
-            tree: BTree::new(free),
+            tree: BTree::new(RcRWLockBTreePageManager::new(free)),
         };
 
         kv.master_load()?;
@@ -83,7 +84,11 @@ impl KV {
         Ok(res.added)
     }
 
-    pub fn seek<'a>(&'a mut self, key: &[u8], compare: CmpOption) -> BTreeIterator<'a, FreeList> {
+    pub fn seek(
+        &self,
+        key: &[u8],
+        compare: CmpOption,
+    ) -> BTreeIterator<RcRWLockBTreePageManager<FreeList>> {
         self.tree.seek(key, compare)
     }
 }
@@ -108,11 +113,21 @@ mod tests {
     }
 
     fn debug_free_list(kv: &KV) {
-        kv.tree.page_manager.debug_free_list();
+        kv.tree
+            .page_manager
+            .page_manager
+            .read()
+            .unwrap()
+            .debug_free_list();
     }
 
     fn get_free_list_total(kv: &KV) -> u64 {
-        kv.tree.page_manager.get_free_list_total()
+        kv.tree
+            .page_manager
+            .page_manager
+            .read()
+            .unwrap()
+            .get_free_list_total()
     }
 
     #[test]

@@ -300,8 +300,8 @@ impl DB {
         scanner.set_table_def(table_def);
         scanner.set_key_end(key_end);
 
-        let mut iter = self.kv.seek(&key_start, scanner.compare_1);
-        scanner.set_iter(&mut iter);
+        let iter = self.kv.seek(&key_start, scanner.compare_1);
+        scanner.set_iter(iter);
 
         Ok(())
     }
